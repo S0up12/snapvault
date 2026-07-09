@@ -11,6 +11,15 @@ export type ChatThread = {
   latest_preview: string;
 };
 
+export type ChatMessageMedia = {
+  id: string;
+  media_type: "image" | "video" | "audio";
+  original_path: string;
+  overlay_path: string | null;
+  thumbnail_path: string | null;
+  playback_path: string | null;
+};
+
 export type ChatMessage = {
   id: string;
   sender: string;
@@ -19,6 +28,7 @@ export type ChatMessage = {
   body: string | null;
   sent_at: string;
   message_type: string;
+  media: ChatMessageMedia[];
 };
 
 export function useChatThreads() {

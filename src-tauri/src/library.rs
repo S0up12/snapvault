@@ -14,6 +14,7 @@ pub struct MemoryAsset {
     pub original_path: String,
     pub overlay_path: Option<String>,
     pub thumbnail_path: Option<String>,
+    pub playback_path: Option<String>,
     pub taken_at: Option<String>,
     pub is_favorite: bool,
     pub tags: Vec<String>,
@@ -156,7 +157,7 @@ fn load_page(
     let order = if sort == "asc" { "ASC" } else { "DESC" };
     let tag_clause = if tag.is_some() { TAG_FILTER_CLAUSE } else { "" };
     let sql = format!(
-        "SELECT id, media_type, original_path, overlay_path, thumbnail_path, taken_at, is_favorite, tags
+        "SELECT id, media_type, original_path, overlay_path, thumbnail_path, playback_path, taken_at, is_favorite, tags
          FROM assets
          WHERE source_type = 'memory' {media} {tag_clause}
          ORDER BY taken_at {order}, id {order}
@@ -179,15 +180,16 @@ fn load_page(
 
     let rows = stmt
         .query_map(rusqlite::params_from_iter(params), |row| {
-            let tags_json: String = row.get(7)?;
+            let tags_json: String = row.get(8)?;
             Ok(MemoryAsset {
                 id: row.get(0)?,
                 media_type: row.get(1)?,
                 original_path: row.get(2)?,
                 overlay_path: row.get(3)?,
                 thumbnail_path: row.get(4)?,
-                taken_at: row.get(5)?,
-                is_favorite: row.get::<_, i64>(6)? != 0,
+                playback_path: row.get(5)?,
+                taken_at: row.get(6)?,
+                is_favorite: row.get::<_, i64>(7)? != 0,
                 tags: serde_json::from_str(&tags_json).unwrap_or_default(),
             })
         })

@@ -7,6 +7,7 @@ export type MemoryAsset = {
   original_path: string;
   overlay_path: string | null;
   thumbnail_path: string | null;
+  playback_path: string | null;
   taken_at: string | null;
   is_favorite: boolean;
   tags: string[];

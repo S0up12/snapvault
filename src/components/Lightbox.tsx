@@ -58,7 +58,7 @@ export default function Lightbox({ assets, currentIndex, onClose, onNavigate, on
   }
 
   const isVideo = asset.media_type === "video";
-  const mediaUrl = convertFileSrc(asset.original_path);
+  const mediaUrl = convertFileSrc(asset.playback_path ?? asset.original_path);
   const overlayUrl = asset.overlay_path ? convertFileSrc(asset.overlay_path) : null;
   const date = formatDayGroup(asset.taken_at);
 

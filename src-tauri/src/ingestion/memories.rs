@@ -387,7 +387,7 @@ fn find_memory_groups(part_dirs: &[PathBuf]) -> Result<Vec<MemoryGroup>, String>
     Ok(groups)
 }
 
-fn media_type_for_extension(ext: &str) -> &'static str {
+pub(super) fn media_type_for_extension(ext: &str) -> &'static str {
     match ext.to_ascii_lowercase().as_str() {
         "mp4" | "mov" | "avi" | "webm" | "m4v" => "video",
         "m4a" | "mp3" | "wav" | "aac" => "audio",

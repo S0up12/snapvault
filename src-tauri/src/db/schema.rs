@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS assets (
         CHECK (media_type IN ('image', 'video', 'audio')),
     original_path TEXT NOT NULL UNIQUE,
     thumbnail_path TEXT,
+    playback_path TEXT,
     overlay_path TEXT,
     checksum_sha256 TEXT,
     file_size_bytes INTEGER,

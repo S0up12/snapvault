@@ -12,6 +12,7 @@ use uuid::Uuid;
 use zip::ZipArchive;
 
 use crate::db::DbState;
+use crate::thumbnails::process_pending_media;
 
 const PROGRESS_EVENT: &str = "ingestion://progress";
 
@@ -89,7 +90,12 @@ pub struct IngestionSummary {
     pub files_timestamp_repaired: usize,
     pub chat_threads_inserted: usize,
     pub chat_messages_inserted: usize,
+    pub chat_media_assets_linked: usize,
     pub profile_found: bool,
+    pub thumbnails_generated: usize,
+    pub thumbnails_failed: usize,
+    pub playback_transcoded: usize,
+    pub playback_failed: usize,
 }
 
 /// Runs the whole Phase 3 pipeline for one import job: extracts one or more
@@ -136,6 +142,7 @@ pub async fn run_ingestion(
     let app_for_blocking = app.clone();
     let job_id_for_blocking = job_id.clone();
     let destination_for_blocking = destination.clone();
+    let app_data_dir_for_blocking = app_data_dir.clone();
 
     let result = tauri::async_runtime::spawn_blocking(
         move || -> Result<IngestionSummary, String> {
@@ -201,6 +208,19 @@ pub async fn run_ingestion(
             let profile_summary =
                 profile::build_profile_snapshot_blocking(&conn, &destination_for_blocking, &emit_profile)?;
 
+            let emit_media = |processed: usize, total: usize, message: String| {
+                emit_progress(
+                    &app_for_blocking,
+                    &job_id_for_blocking,
+                    "processing_media",
+                    processed,
+                    total,
+                    message,
+                );
+            };
+            let media_summary =
+                process_pending_media(&conn, &app_data_dir_for_blocking, &emit_media)?;
+
             Ok(IngestionSummary {
                 job_id: job_id_for_blocking.clone(),
                 destination: extraction.destination,
@@ -215,7 +235,12 @@ pub async fn run_ingestion(
                 files_timestamp_repaired: parsing.files_timestamp_repaired,
                 chat_threads_inserted: chats_summary.threads_inserted,
                 chat_messages_inserted: chats_summary.messages_inserted,
+                chat_media_assets_linked: chats_summary.media_assets_linked,
                 profile_found: profile_summary.profile_found,
+                thumbnails_generated: media_summary.generated,
+                thumbnails_failed: media_summary.failed,
+                playback_transcoded: media_summary.playback_transcoded,
+                playback_failed: media_summary.playback_failed,
             })
         },
     )

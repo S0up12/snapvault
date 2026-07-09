@@ -35,6 +35,7 @@ pub fn init(app_handle: &AppHandle) -> Result<Connection, String> {
     // replace this with a versioned migration list.
     add_column_if_missing(&conn, "assets", "latitude", "REAL")?;
     add_column_if_missing(&conn, "assets", "longitude", "REAL")?;
+    add_column_if_missing(&conn, "assets", "playback_path", "TEXT")?;
 
     Ok(conn)
 }

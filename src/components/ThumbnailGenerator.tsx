@@ -12,6 +12,8 @@ type ThumbnailSummary = {
   total: number;
   generated: number;
   failed: number;
+  playback_transcoded: number;
+  playback_failed: number;
 };
 
 type Status = "idle" | "running" | "completed" | "error";
@@ -67,10 +69,10 @@ export default function ThumbnailGenerator() {
       <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-sky-700/70 dark:text-sky-200/65">
         Thumbnails
       </p>
-      <p className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">Generate thumbnails</p>
+      <p className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">Reprocess media</p>
       <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-        Creates optimized previews for memories that don't have one yet. Required before the
-        Memories grid can render images.
+        New imports generate thumbnails and convert incompatible videos (e.g. HEVC) automatically.
+        Use this to backfill libraries imported before that existed, or to retry any that failed.
       </p>
 
       <button
@@ -84,7 +86,7 @@ export default function ThumbnailGenerator() {
         ) : (
           <ImageIcon className="h-4 w-4" />
         )}
-        {status === "running" ? "Generating..." : "Generate thumbnails"}
+        {status === "running" ? "Processing..." : "Reprocess media"}
       </button>
 
       {status === "running" ? (
@@ -114,13 +116,15 @@ export default function ThumbnailGenerator() {
           <div className="flex items-center gap-2">
             <CheckCircle2 className="h-5 w-5 text-emerald-500" />
             <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">
-              {summary.total === 0 ? "Nothing to generate" : "Thumbnails generated"}
+              {summary.total === 0 ? "Nothing to process" : "Media processed"}
             </p>
           </div>
           <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
             <Stat label="Total" value={summary.total} />
-            <Stat label="Generated" value={summary.generated} />
-            <Stat label="Failed" value={summary.failed} />
+            <Stat label="Thumbnails generated" value={summary.generated} />
+            <Stat label="Thumbnail failures" value={summary.failed} />
+            <Stat label="Videos converted" value={summary.playback_transcoded} />
+            <Stat label="Conversion failures" value={summary.playback_failed} />
           </div>
         </div>
       ) : null}

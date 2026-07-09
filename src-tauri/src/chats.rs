@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::Value;
@@ -16,6 +18,16 @@ pub struct ChatThreadSummary {
 }
 
 #[derive(Clone, Serialize)]
+pub struct ChatMessageMedia {
+    pub id: String,
+    pub media_type: String,
+    pub original_path: String,
+    pub overlay_path: Option<String>,
+    pub thumbnail_path: Option<String>,
+    pub playback_path: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
 pub struct ChatMessageView {
     pub id: String,
     pub sender: String,
@@ -24,6 +36,7 @@ pub struct ChatMessageView {
     pub body: Option<String>,
     pub sent_at: String,
     pub message_type: String,
+    pub media: Vec<ChatMessageMedia>,
 }
 
 /// Lists every chat thread, newest activity first, each with a message count
@@ -104,7 +117,7 @@ fn load_messages(conn: &Connection, thread_id: &str) -> Result<Vec<ChatMessageVi
         )
         .map_err(|err| err.to_string())?;
 
-    let messages = stmt
+    let mut messages = stmt
         .query_map([thread_id], |row| {
             let sender: String = row.get(1)?;
             let raw_payload: Option<String> = row.get(5)?;
@@ -121,11 +134,54 @@ fn load_messages(conn: &Connection, thread_id: &str) -> Result<Vec<ChatMessageVi
                 body: row.get(2)?,
                 sent_at: row.get(3)?,
                 message_type: row.get(4)?,
+                media: Vec::new(),
             })
         })
         .map_err(|err| err.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|err| err.to_string())?;
+
+    // Separate query rather than a JOIN on the message query above: a JOIN
+    // would repeat every non-media column per attachment, which then needs
+    // unwinding back into one row per message anyway.
+    let mut media_stmt = conn
+        .prepare(
+            "SELECT cma.message_id, a.id, a.media_type, a.original_path, a.overlay_path, a.thumbnail_path, a.playback_path
+             FROM chat_message_assets cma
+             JOIN assets a ON a.id = cma.asset_id
+             JOIN chat_messages cm ON cm.id = cma.message_id
+             WHERE cm.thread_id = ?1",
+        )
+        .map_err(|err| err.to_string())?;
+    let media_rows = media_stmt
+        .query_map([thread_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                ChatMessageMedia {
+                    id: row.get(1)?,
+                    media_type: row.get(2)?,
+                    original_path: row.get(3)?,
+                    overlay_path: row.get(4)?,
+                    thumbnail_path: row.get(5)?,
+                    playback_path: row.get(6)?,
+                },
+            ))
+        })
+        .map_err(|err| err.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| err.to_string())?;
+
+    let index_by_id: HashMap<String, usize> = messages
+        .iter()
+        .enumerate()
+        .map(|(idx, message)| (message.id.clone(), idx))
+        .collect();
+    for (message_id, media) in media_rows {
+        if let Some(&idx) = index_by_id.get(&message_id) {
+            messages[idx].media.push(media);
+        }
+    }
+
     Ok(messages)
 }
 
@@ -265,5 +321,43 @@ mod tests {
 
         let messages = load_messages(&conn, "t1").unwrap();
         assert_eq!(messages.iter().map(|m| m.body.clone().unwrap()).collect::<Vec<_>>(), vec!["first", "second"]);
+    }
+
+    #[test]
+    fn messages_carry_their_linked_media() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        seed_thread(&conn, "t1", "friend1", None, false);
+        seed_message(&conn, "t1", "friend1", None, "2020-01-01T00:00:00.000Z", false);
+        let message_id: String = conn
+            .query_row("SELECT id FROM chat_messages WHERE thread_id = 't1'", [], |row| row.get(0))
+            .unwrap();
+
+        conn.execute(
+            "INSERT INTO assets (id, source_type, media_type, original_path) VALUES ('a1', 'chat', 'image', '/chat_media/a.jpg')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO chat_message_assets (message_id, asset_id) VALUES (?1, 'a1')",
+            [&message_id],
+        )
+        .unwrap();
+
+        let messages = load_messages(&conn, "t1").unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].media.len(), 1);
+        assert_eq!(messages[0].media[0].original_path, "/chat_media/a.jpg");
+    }
+
+    #[test]
+    fn message_without_linked_media_has_empty_media_list() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        seed_thread(&conn, "t1", "friend1", None, false);
+        seed_message(&conn, "t1", "friend1", Some("hi"), "2020-01-01T00:00:00.000Z", false);
+
+        let messages = load_messages(&conn, "t1").unwrap();
+        assert!(messages[0].media.is_empty());
     }
 }

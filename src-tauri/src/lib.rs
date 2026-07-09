@@ -2,6 +2,7 @@ mod chats;
 mod db;
 mod ingestion;
 mod library;
+mod maintenance;
 mod profile;
 mod thumbnails;
 
@@ -11,6 +12,7 @@ use chats::{list_chat_messages, list_chat_threads};
 use db::DbState;
 use ingestion::run_ingestion;
 use library::{list_memory_assets, list_memory_tags, set_asset_favorite, set_asset_tags};
+use maintenance::{get_library_stats, reset_library, verify_library};
 use profile::get_profile_snapshot;
 use tauri::Manager;
 use thumbnails::generate_thumbnails;
@@ -64,7 +66,10 @@ pub fn run() {
             set_asset_tags,
             list_chat_threads,
             list_chat_messages,
-            get_profile_snapshot
+            get_profile_snapshot,
+            get_library_stats,
+            verify_library,
+            reset_library
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

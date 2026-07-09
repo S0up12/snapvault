@@ -1,3 +1,4 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { LoaderCircle, MessageSquareMore, Users } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -7,6 +8,7 @@ import {
   useChatMessages,
   useChatThreads,
   type ChatMessage,
+  type ChatMessageMedia,
   type ChatThread,
 } from "../hooks/useChats";
 import { formatDayGroup } from "../hooks/useMemories";
@@ -150,7 +152,8 @@ function MessagePane({ thread }: { thread: ChatThread }) {
 
 function MessageBubble({ message, isGroup }: { message: ChatMessage; isGroup: boolean }) {
   const tone = senderTone(message, isGroup);
-  const text = message.body?.trim() || (message.message_type !== "TEXT" ? "Media attachment" : "");
+  const hasMedia = message.media.length > 0;
+  const text = message.body?.trim() || (!hasMedia && message.message_type !== "TEXT" ? "Media attachment" : "");
 
   return (
     <div className="flex justify-start">
@@ -163,13 +166,56 @@ function MessageBubble({ message, isGroup }: { message: ChatMessage; isGroup: bo
         <div className="group mt-1.5 inline-flex items-stretch gap-3">
           <div className={["w-[3px] shrink-0 rounded-full", tone.pole].join(" ")} />
           <div className="min-w-0 flex-1 rounded-r-[1.35rem] rounded-bl-[0.45rem] border border-slate-200/80 bg-white/88 px-4 py-3 text-slate-900 shadow-sm transition duration-150 group-hover:border-slate-300 dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-100">
-            {text || <span className="text-slate-400 dark:text-slate-500">Message content unavailable</span>}
+            {hasMedia ? (
+              <div className="flex flex-col gap-2">
+                {message.media.map((media) => (
+                  <ChatMediaAttachment key={media.id} media={media} />
+                ))}
+                {text ? <p>{text}</p> : null}
+              </div>
+            ) : (
+              text || <span className="text-slate-400 dark:text-slate-500">Message content unavailable</span>
+            )}
           </div>
           <div className="inline-flex min-h-[2.75rem] items-center px-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400 opacity-0 transition duration-150 group-hover:opacity-100">
             <span>{formatMessageTime(message.sent_at)}</span>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ChatMediaAttachment({ media }: { media: ChatMessageMedia }) {
+  const mediaUrl = convertFileSrc(media.playback_path ?? media.original_path);
+  const overlayUrl = media.overlay_path ? convertFileSrc(media.overlay_path) : null;
+  const isVideo = media.media_type === "video";
+
+  return (
+    <div className="relative inline-grid max-h-64 max-w-[240px] place-items-center overflow-hidden rounded-[0.9rem] bg-black/5 dark:bg-black/20">
+      {isVideo ? (
+        <video
+          src={mediaUrl}
+          controls
+          playsInline
+          preload="metadata"
+          className="col-start-1 row-start-1 max-h-64 max-w-[240px] rounded-[0.9rem] object-contain"
+        />
+      ) : (
+        <img
+          src={mediaUrl}
+          alt=""
+          className="col-start-1 row-start-1 max-h-64 max-w-[240px] rounded-[0.9rem] object-contain"
+        />
+      )}
+      {overlayUrl ? (
+        <img
+          src={overlayUrl}
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none col-start-1 row-start-1 h-full w-full rounded-[0.9rem] object-fill"
+        />
+      ) : null}
     </div>
   );
 }

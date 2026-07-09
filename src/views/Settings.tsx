@@ -1,7 +1,239 @@
+import { invoke } from "@tauri-apps/api/core";
+import { confirm } from "@tauri-apps/plugin-dialog";
+import { AlertCircle, AlertTriangle, CheckCircle2, LoaderCircle, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
+import { useState } from "react";
+
+import ThumbnailGenerator from "../components/ThumbnailGenerator";
+import { useLibraryStats } from "../hooks/useLibraryStats";
+
+type VerifySummary = {
+  checked: number;
+  missing_original: number;
+  missing_thumbnail: number;
+  missing_playback: number;
+};
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(1)} ${units[unitIndex]}`;
+}
+
 export default function Settings() {
   return (
-    <div className="rounded-[1.75rem] border border-slate-200/80 bg-white/80 p-8 text-sm text-slate-500 shadow-[0_20px_48px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400">
-      Settings view coming soon.
+    <div className="space-y-4">
+      <LibraryStatsPanel />
+      <ThumbnailGenerator />
+      <VerifyLibraryPanel />
+      <DangerZonePanel />
     </div>
+  );
+}
+
+function Panel({
+  title,
+  description,
+  children,
+  headerAction,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+  headerAction?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-[1.75rem] border border-slate-200/80 bg-white/80 p-8 shadow-[0_20px_48px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04]">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-sky-700/70 dark:text-sky-200/65">
+            {title}
+          </p>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{description}</p>
+        </div>
+        {headerAction}
+      </div>
+      <div className="mt-4">{children}</div>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-[0.9rem] border border-slate-200/70 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</p>
+      <p className="mt-0.5 text-base font-semibold text-slate-900 dark:text-white">
+        {typeof value === "number" ? value.toLocaleString() : value}
+      </p>
+    </div>
+  );
+}
+
+function LibraryStatsPanel() {
+  const { stats, isLoading, error, refresh } = useLibraryStats();
+
+  return (
+    <Panel
+      title="Library"
+      description="What's actually in the database right now."
+      headerAction={
+        <button
+          type="button"
+          onClick={refresh}
+          disabled={isLoading}
+          className="inline-flex items-center gap-1.5 rounded-2xl border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200"
+        >
+          <RefreshCcw className={isLoading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+          Refresh
+        </button>
+      }
+    >
+      {error ? (
+        <p className="text-sm text-red-500">Failed to load library stats: {error}</p>
+      ) : !stats ? (
+        <div className="flex items-center justify-center py-6 text-slate-400 dark:text-slate-500">
+          <LoaderCircle className="h-5 w-5 animate-spin" />
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+          <Stat label="Total assets" value={stats.total_assets} />
+          <Stat label="Photos" value={stats.images} />
+          <Stat label="Videos" value={stats.videos} />
+          <Stat label="Audio" value={stats.audio} />
+          <Stat label="Thumbnails missing" value={stats.thumbnails_missing} />
+          <Stat label="Videos pending conversion" value={stats.playback_pending} />
+          <Stat label="Memory items" value={stats.memory_items} />
+          <Stat label="Chat threads" value={stats.chat_threads} />
+          <Stat label="Chat messages" value={stats.chat_messages} />
+          <Stat label="Chat media linked" value={stats.chat_media_linked} />
+          <Stat label="Profile imported" value={stats.profile_found ? "Yes" : "No"} />
+          <Stat label="Database size" value={formatBytes(stats.db_size_bytes)} />
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function VerifyLibraryPanel() {
+  const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [summary, setSummary] = useState<VerifySummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleVerify() {
+    setStatus("running");
+    setError(null);
+    try {
+      const result = await invoke<VerifySummary>("verify_library");
+      setSummary(result);
+      setStatus("done");
+    } catch (err) {
+      setError(String(err));
+      setStatus("error");
+    }
+  }
+
+  const hasIssues = summary && (summary.missing_original > 0 || summary.missing_thumbnail > 0 || summary.missing_playback > 0);
+
+  return (
+    <Panel title="Verify library" description="Checks that every asset's file (original, thumbnail, playback copy) still exists on disk.">
+      <button
+        type="button"
+        onClick={handleVerify}
+        disabled={status === "running"}
+        className="inline-flex items-center gap-2 rounded-[1rem] border border-sky-300/30 bg-sky-500/10 px-4 py-2 text-sm font-medium text-sky-700 transition hover:border-sky-400/45 hover:bg-sky-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:text-sky-200"
+      >
+        {status === "running" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+        {status === "running" ? "Verifying..." : "Verify library"}
+      </button>
+
+      {status === "error" && error ? (
+        <div className="mt-4 rounded-[1.25rem] border border-red-300/50 bg-red-500/5 p-4 dark:border-red-400/30 dark:bg-red-500/10">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-5 w-5 text-red-500" />
+            <p className="text-sm font-semibold text-red-600 dark:text-red-300">Verify failed</p>
+          </div>
+          <p className="mt-1.5 text-xs text-red-500">{error}</p>
+        </div>
+      ) : null}
+
+      {status === "done" && summary ? (
+        <div
+          className={[
+            "mt-4 rounded-[1.25rem] border p-4",
+            hasIssues
+              ? "border-amber-300/50 bg-amber-500/5 dark:border-amber-400/30 dark:bg-amber-500/10"
+              : "border-emerald-300/40 bg-emerald-500/5 dark:border-emerald-400/20 dark:bg-emerald-500/5",
+          ].join(" ")}
+        >
+          <div className="flex items-center gap-2">
+            {hasIssues ? (
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+            ) : (
+              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+            )}
+            <p className={hasIssues ? "text-sm font-semibold text-amber-700 dark:text-amber-300" : "text-sm font-semibold text-emerald-700 dark:text-emerald-300"}>
+              {hasIssues ? "Some files are missing" : "Everything checks out"}
+            </p>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+            <Stat label="Checked" value={summary.checked} />
+            <Stat label="Missing originals" value={summary.missing_original} />
+            <Stat label="Missing thumbnails" value={summary.missing_thumbnail} />
+            <Stat label="Missing playback copies" value={summary.missing_playback} />
+          </div>
+        </div>
+      ) : null}
+    </Panel>
+  );
+}
+
+function DangerZonePanel() {
+  const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleReset() {
+    const confirmed = await confirm(
+      "This deletes every imported asset, chat, memory, and profile snapshot, plus all extracted files, thumbnails, and playback copies on disk. This cannot be undone.",
+      { title: "Reset library and start over?", kind: "warning" },
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setStatus("running");
+    setError(null);
+    try {
+      await invoke("reset_library");
+      setStatus("done");
+    } catch (err) {
+      setError(String(err));
+      setStatus("error");
+    }
+  }
+
+  return (
+    <Panel title="Danger zone" description="Wipe the database and every extracted/generated file, so you can re-import from a clean slate.">
+      <button
+        type="button"
+        onClick={handleReset}
+        disabled={status === "running"}
+        className="inline-flex items-center gap-2 rounded-[1rem] border border-red-400/40 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-600 transition hover:border-red-400/60 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300"
+      >
+        {status === "running" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+        {status === "running" ? "Resetting..." : "Reset library & start over"}
+      </button>
+
+      {status === "done" ? (
+        <p className="mt-3 text-sm text-emerald-600 dark:text-emerald-300">
+          Library reset. Go to the Dashboard to import a fresh export.
+        </p>
+      ) : null}
+      {status === "error" && error ? <p className="mt-3 text-sm text-red-500">Reset failed: {error}</p> : null}
+    </Panel>
   );
 }
