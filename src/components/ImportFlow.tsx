@@ -4,7 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { AlertCircle, CheckCircle2, Circle, FolderOpen, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-type Phase = "extracting" | "parsing";
+type Phase = "extracting" | "parsing" | "parsing_chats" | "parsing_profile";
 
 type ProgressEvent =
   | {
@@ -31,6 +31,9 @@ type IngestionSummary = {
   assets_inserted: number;
   memory_items_inserted: number;
   files_timestamp_repaired: number;
+  chat_threads_inserted: number;
+  chat_messages_inserted: number;
+  profile_found: boolean;
 };
 
 type Status = "idle" | "running" | "completed" | "error";
@@ -38,6 +41,8 @@ type Status = "idle" | "running" | "completed" | "error";
 const STEPS: { key: Phase; label: string }[] = [
   { key: "extracting", label: "Extracting files" },
   { key: "parsing", label: "Parsing metadata & repairing timestamps" },
+  { key: "parsing_chats", label: "Importing chat history" },
+  { key: "parsing_profile", label: "Importing profile metadata" },
 ];
 
 export default function ImportFlow() {
@@ -227,6 +232,8 @@ export default function ImportFlow() {
             <Stat label="Memory items" value={summary.memory_items_inserted} />
             <Stat label="Timestamps repaired" value={summary.files_timestamp_repaired} />
             <Stat label="Unmatched files" value={summary.unmatched_files} />
+            <Stat label="Chat threads" value={summary.chat_threads_inserted} />
+            <Stat label="Chat messages" value={summary.chat_messages_inserted} />
           </div>
         </div>
       ) : null}

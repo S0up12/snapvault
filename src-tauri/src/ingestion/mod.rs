@@ -1,4 +1,6 @@
+pub mod chats;
 pub mod memories;
+pub mod profile;
 
 use std::fs;
 use std::io;
@@ -85,6 +87,9 @@ pub struct IngestionSummary {
     pub assets_inserted: usize,
     pub memory_items_inserted: usize,
     pub files_timestamp_repaired: usize,
+    pub chat_threads_inserted: usize,
+    pub chat_messages_inserted: usize,
+    pub profile_found: bool,
 }
 
 /// Runs the whole Phase 3 pipeline for one import job: extracts one or more
@@ -170,6 +175,32 @@ pub async fn run_ingestion(
                 &emit_parse,
             )?;
 
+            let emit_chats = |processed: usize, total: usize, message: String| {
+                emit_progress(
+                    &app_for_blocking,
+                    &job_id_for_blocking,
+                    "parsing_chats",
+                    processed,
+                    total,
+                    message,
+                );
+            };
+            let chats_summary =
+                chats::parse_chats_blocking(&conn, &destination_for_blocking, &emit_chats)?;
+
+            let emit_profile = |processed: usize, total: usize, message: String| {
+                emit_progress(
+                    &app_for_blocking,
+                    &job_id_for_blocking,
+                    "parsing_profile",
+                    processed,
+                    total,
+                    message,
+                );
+            };
+            let profile_summary =
+                profile::build_profile_snapshot_blocking(&conn, &destination_for_blocking, &emit_profile)?;
+
             Ok(IngestionSummary {
                 job_id: job_id_for_blocking.clone(),
                 destination: extraction.destination,
@@ -182,6 +213,9 @@ pub async fn run_ingestion(
                 assets_inserted: parsing.assets_inserted,
                 memory_items_inserted: parsing.memory_items_inserted,
                 files_timestamp_repaired: parsing.files_timestamp_repaired,
+                chat_threads_inserted: chats_summary.threads_inserted,
+                chat_messages_inserted: chats_summary.messages_inserted,
+                profile_found: profile_summary.profile_found,
             })
         },
     )
@@ -216,6 +250,26 @@ pub async fn run_ingestion(
     }
 
     result
+}
+
+/// Finds the `part-NNN` directories every ingestion job's files live under
+/// (one per source zip - see `extract_archives_blocking`). Shared by the
+/// memories/chats/profile parsers, which all walk the same job layout.
+fn find_part_dirs(job_dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut parts: Vec<PathBuf> = fs::read_dir(job_dir)
+        .map_err(|err| format!("failed to read {}: {err}", job_dir.display()))?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_dir()
+                && path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("part-"))
+        })
+        .collect();
+    parts.sort();
+    Ok(parts)
 }
 
 fn open_zip(source: &Path) -> Result<ZipArchive<io::BufReader<fs::File>>, String> {

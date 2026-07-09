@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tauri-app",
+  "productName": "SnapVault",
   "version": "0.1.0",
   "identifier": "com.snapvault.app",
   "build": {
@@ -12,13 +12,17 @@
   "app": {
     "windows": [
       {
-        "title": "tauri-app",
+        "title": "SnapVault",
         "width": 800,
         "height": 600
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/thumbnails/*", "$APPDATA/imports/**"]
+      }
     }
   },
   "bundle": {

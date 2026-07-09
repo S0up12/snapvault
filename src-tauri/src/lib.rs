@@ -1,11 +1,19 @@
+mod chats;
 mod db;
 mod ingestion;
+mod library;
+mod profile;
+mod thumbnails;
 
 use std::sync::Mutex;
 
+use chats::{list_chat_messages, list_chat_threads};
 use db::DbState;
 use ingestion::run_ingestion;
+use library::{list_memory_assets, list_memory_tags, set_asset_favorite, set_asset_tags};
+use profile::get_profile_snapshot;
 use tauri::Manager;
+use thumbnails::generate_thumbnails;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -48,7 +56,15 @@ pub fn run() {
             greet,
             count_assets,
             db_table_names,
-            run_ingestion
+            run_ingestion,
+            generate_thumbnails,
+            list_memory_assets,
+            list_memory_tags,
+            set_asset_favorite,
+            set_asset_tags,
+            list_chat_threads,
+            list_chat_messages,
+            get_profile_snapshot
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

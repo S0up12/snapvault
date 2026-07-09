@@ -54,7 +54,7 @@ pub(super) fn parse_memories_blocking(
 ) -> Result<ParseMemoriesSummary, String> {
     emit(0, 0, "Parsing metadata".to_string());
 
-    let part_dirs = find_part_dirs(job_dir)?;
+    let part_dirs = super::find_part_dirs(job_dir)?;
 
     let json_items = load_saved_media(&part_dirs)?;
     let mut json_by_day: HashMap<String, Vec<JsonMemoryItem>> = HashMap::new();
@@ -166,23 +166,6 @@ pub(super) fn parse_memories_blocking(
     })
 }
 
-fn find_part_dirs(job_dir: &Path) -> Result<Vec<PathBuf>, String> {
-    let mut parts: Vec<PathBuf> = fs::read_dir(job_dir)
-        .map_err(|err| format!("failed to read {}: {err}", job_dir.display()))?
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_dir()
-                && path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.starts_with("part-"))
-        })
-        .collect();
-    parts.sort();
-    Ok(parts)
-}
-
 fn load_saved_media(part_dirs: &[PathBuf]) -> Result<Vec<JsonMemoryItem>, String> {
     let mut items = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -290,7 +273,7 @@ fn parse_iso_to_system_time(iso: &str) -> Option<SystemTime> {
 /// Snapchat formats memory dates as `"2026-07-04 14:33:51 UTC"`. Fixed-width
 /// zero-padded fields mean no calendar arithmetic is needed - just slice and
 /// reformat to the app's `YYYY-MM-DDTHH:MM:SS.000Z` convention.
-fn parse_snap_date(raw: &str) -> Option<(String, String)> {
+pub(super) fn parse_snap_date(raw: &str) -> Option<(String, String)> {
     let cleaned = raw.trim().trim_end_matches(" UTC").trim();
     let bytes = cleaned.as_bytes();
     if cleaned.len() != 19
@@ -560,7 +543,7 @@ mod tests {
             .unwrap();
         }
 
-        let part_dirs = find_part_dirs(&job_dir).unwrap();
+        let part_dirs = super::super::find_part_dirs(&job_dir).unwrap();
         let items = load_saved_media(&part_dirs).unwrap();
 
         // 2 genuine duplicates within part-000 survive; part-001's copy is a
