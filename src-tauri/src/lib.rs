@@ -4,7 +4,7 @@ mod ingestion;
 use std::sync::Mutex;
 
 use db::DbState;
-use ingestion::extract_snapchat_export;
+use ingestion::run_ingestion;
 use tauri::Manager;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -48,7 +48,7 @@ pub fn run() {
             greet,
             count_assets,
             db_table_names,
-            extract_snapchat_export
+            run_ingestion
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -11,6 +11,10 @@
 ///   project explicitly excludes (see AGENT.md's architectural rules)
 /// - the Postgres GIN index on `assets.tags` has no SQLite equivalent for a
 ///   JSON-in-TEXT column; deferred until tag search is actually implemented
+/// - `assets.latitude`/`longitude` have no equivalent in the old models at all:
+///   the old app only ever stored account-level location summaries as opaque
+///   strings, never per-memory GPS. Newer Snapchat exports include a
+///   `Location` field per `memories_history.json` entry, so this is new.
 pub const SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS assets (
     id TEXT PRIMARY KEY,
@@ -25,6 +29,8 @@ CREATE TABLE IF NOT EXISTS assets (
     checksum_sha256 TEXT,
     file_size_bytes INTEGER,
     taken_at TEXT,
+    latitude REAL,
+    longitude REAL,
     is_favorite INTEGER NOT NULL DEFAULT 0,
     tags TEXT NOT NULL DEFAULT '[]',
     raw_metadata TEXT,
