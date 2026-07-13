@@ -4,6 +4,9 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { AlertCircle, CheckCircle2, Circle, FolderOpen, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import StorageChoiceModal from "./StorageChoiceModal";
+import type { StorageInfo } from "../hooks/useStorageSettings";
+
 type Phase = "extracting" | "parsing" | "parsing_chats" | "parsing_profile" | "processing_media";
 
 type ProgressEvent =
@@ -59,6 +62,7 @@ export default function ImportFlow() {
   const [donePhases, setDonePhases] = useState<Set<Phase>>(new Set());
   const [summary, setSummary] = useState<IngestionSummary | null>(null);
   const [error, setError] = useState<{ phase: string; message: string } | null>(null);
+  const [storageChoice, setStorageChoice] = useState<{ defaultPath: string } | null>(null);
   const activePhaseRef = useRef<Phase | null>(null);
 
   useEffect(() => {
@@ -89,6 +93,15 @@ export default function ImportFlow() {
   }, []);
 
   async function handleSelectFile() {
+    const storageInfo = await invoke<StorageInfo>("get_storage_info");
+    if (storageInfo.needs_first_run_choice) {
+      setStorageChoice({ defaultPath: storageInfo.media_root });
+      return;
+    }
+    await openArchivePicker();
+  }
+
+  async function openArchivePicker() {
     const selected = await open({
       title: "Select Snapchat export (select all parts if it was split into several zips)",
       filters: [{ name: "Snapchat export", extensions: ["zip"] }],
@@ -245,6 +258,17 @@ export default function ImportFlow() {
             <Stat label="Videos converted" value={summary.playback_transcoded} />
           </div>
         </div>
+      ) : null}
+
+      {storageChoice ? (
+        <StorageChoiceModal
+          defaultPath={storageChoice.defaultPath}
+          allowCancel={false}
+          onChosen={() => {
+            setStorageChoice(null);
+            void openArchivePicker();
+          }}
+        />
       ) : null}
     </div>
   );

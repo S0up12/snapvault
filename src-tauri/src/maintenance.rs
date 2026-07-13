@@ -117,10 +117,7 @@ fn verify_library_blocking(conn: &Connection) -> Result<VerifySummary, String> {
 /// SQLite holds that file open for the app's whole lifetime.
 #[tauri::command]
 pub async fn reset_library(app: AppHandle, state: tauri::State<'_, DbState>) -> Result<(), String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|err| format!("failed to resolve app data dir: {err}"))?;
+    let media_root = crate::storage::resolve_media_root(&app)?;
 
     {
         let conn = state.0.lock().map_err(|err| err.to_string())?;
@@ -128,7 +125,7 @@ pub async fn reset_library(app: AppHandle, state: tauri::State<'_, DbState>) -> 
     }
 
     for dir_name in ["imports", "thumbnails", "playback"] {
-        let dir = app_data_dir.join(dir_name);
+        let dir = media_root.join(dir_name);
         if dir.is_dir() {
             std::fs::remove_dir_all(&dir).map_err(|err| format!("failed to remove {}: {err}", dir.display()))?;
         }

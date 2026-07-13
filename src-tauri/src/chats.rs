@@ -182,6 +182,17 @@ fn load_messages(conn: &Connection, thread_id: &str) -> Result<Vec<ChatMessageVi
         }
     }
 
+    // Drop messages with nothing displayable: no body text and no linked
+    // media. This isn't limited to `TEXT` rows - Snapchat's chat_history.json
+    // routinely references MEDIA/SHARE/STICKER/STATUS/NOTE entries whose
+    // media either has no `Media IDs` at all or an id with no matching file
+    // in the export (expired/premium snaps, media the export just didn't
+    // bundle), so `media` ends up empty for those too. Without this filter
+    // those render as a bare "Media attachment" bubble with nothing inside.
+    messages.retain(|message| {
+        message.body.as_deref().is_some_and(|body| !body.trim().is_empty()) || !message.media.is_empty()
+    });
+
     Ok(messages)
 }
 
@@ -348,6 +359,86 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].media.len(), 1);
         assert_eq!(messages[0].media[0].original_path, "/chat_media/a.jpg");
+    }
+
+    #[test]
+    fn drops_empty_text_messages_with_no_body_and_no_media() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        seed_thread(&conn, "t1", "friend1", None, false);
+        // Empty TEXT row - nothing to display, should be dropped.
+        seed_message(&conn, "t1", "friend1", None, "2020-01-01T00:00:00.000Z", false);
+        // Real message - should survive.
+        seed_message(&conn, "t1", "friend1", Some("hi"), "2020-01-02T00:00:00.000Z", false);
+
+        let messages = load_messages(&conn, "t1").unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].body.as_deref(), Some("hi"));
+    }
+
+    #[test]
+    fn drops_non_text_messages_with_no_body_and_no_linked_media() {
+        // Snapchat's chat_history.json routinely references MEDIA/SHARE/
+        // STICKER/STATUS/NOTE entries whose media never resolves to a file
+        // in the export (an id with nothing at that path, or no Media IDs at
+        // all). With no body either, there is genuinely nothing to display -
+        // this used to render as a bare "Media attachment" bubble with no
+        // media inside it.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        seed_thread(&conn, "t1", "friend1", None, false);
+        for (id, message_type) in [
+            ("m1", "MEDIA"),
+            ("m2", "SHARE"),
+            ("m3", "STICKER"),
+            ("m4", "STATUS"),
+            ("m5", "NOTE"),
+        ] {
+            conn.execute(
+                "INSERT INTO chat_messages (id, thread_id, sender, body, sent_at, message_type, source, dedupe_key, raw_payload)
+                 VALUES (?1, 't1', 'friend1', NULL, '2020-01-01T00:00:00.000Z', ?2, 'chat_history', ?3, '{\"IsSender\":false}')",
+                rusqlite::params![id, message_type, format!("dk-{id}")],
+            )
+            .unwrap();
+        }
+
+        let messages = load_messages(&conn, "t1").unwrap();
+        assert!(messages.is_empty());
+    }
+
+    #[test]
+    fn keeps_non_text_messages_that_have_a_caption_or_linked_media() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        seed_thread(&conn, "t1", "friend1", None, false);
+        // A MEDIA message with a caption but no linked media file - the
+        // caption is real content, so it must survive even with no media.
+        conn.execute(
+            "INSERT INTO chat_messages (id, thread_id, sender, body, sent_at, message_type, source, dedupe_key, raw_payload)
+             VALUES ('m1', 't1', 'friend1', 'check this out', '2020-01-01T00:00:00.000Z', 'MEDIA', 'chat_history', 'dk1', '{\"IsSender\":false}')",
+            [],
+        )
+        .unwrap();
+        // A MEDIA message with no body but a successfully linked asset.
+        conn.execute(
+            "INSERT INTO chat_messages (id, thread_id, sender, body, sent_at, message_type, source, dedupe_key, raw_payload)
+             VALUES ('m2', 't1', 'friend1', NULL, '2020-01-02T00:00:00.000Z', 'MEDIA', 'chat_history', 'dk2', '{\"IsSender\":false}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO assets (id, source_type, media_type, original_path) VALUES ('a1', 'chat', 'image', '/chat_media/a.jpg')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO chat_message_assets (message_id, asset_id) VALUES ('m2', 'a1')",
+            [],
+        )
+        .unwrap();
+
+        let messages = load_messages(&conn, "t1").unwrap();
+        assert_eq!(messages.len(), 2);
     }
 
     #[test]

@@ -99,9 +99,11 @@ pub struct IngestionSummary {
 }
 
 /// Runs the whole Phase 3 pipeline for one import job: extracts one or more
-/// Snapchat export .zip parts into `<app_data_dir>/imports/<job_id>/part-NNN/`
-/// (large exports are split by Snapchat into several zip parts that each
-/// carry a different slice of the account), then parses `memories_history.json`
+/// Snapchat export .zip parts into `<media_root>/imports/<job_id>/part-NNN/`
+/// (`media_root` resolved via `storage::resolve_media_root` - the OS app-data
+/// dir by default, or a user-chosen folder; large exports are split by
+/// Snapchat into several zip parts that each carry a different slice of the
+/// account), then parses `memories_history.json`
 /// against the extracted files and repairs their OS timestamps. Runs on a
 /// background thread via `spawn_blocking` so the UI never stalls, and emits
 /// `ingestion://progress` events throughout both phases for the frontend to
@@ -133,16 +135,13 @@ pub async fn run_ingestion(
         sources.push(source);
     }
 
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|err| format!("failed to resolve app data dir: {err}"))?;
-    let destination = app_data_dir.join("imports").join(&job_id);
+    let media_root = crate::storage::resolve_media_root(&app)?;
+    let destination = media_root.join("imports").join(&job_id);
 
     let app_for_blocking = app.clone();
     let job_id_for_blocking = job_id.clone();
     let destination_for_blocking = destination.clone();
-    let app_data_dir_for_blocking = app_data_dir.clone();
+    let media_root_for_blocking = media_root.clone();
 
     let result = tauri::async_runtime::spawn_blocking(
         move || -> Result<IngestionSummary, String> {
@@ -208,6 +207,12 @@ pub async fn run_ingestion(
             let profile_summary =
                 profile::build_profile_snapshot_blocking(&conn, &destination_for_blocking, &emit_profile)?;
 
+            // Release the lock before the (potentially long, one ffmpeg call
+            // per asset) media-processing phase so other commands aren't
+            // frozen out of the DB for the rest of the job - process_pending_media
+            // re-locks briefly on its own between ffmpeg calls instead.
+            drop(conn);
+
             let emit_media = |processed: usize, total: usize, message: String| {
                 emit_progress(
                     &app_for_blocking,
@@ -219,7 +224,7 @@ pub async fn run_ingestion(
                 );
             };
             let media_summary =
-                process_pending_media(&conn, &app_data_dir_for_blocking, &emit_media)?;
+                process_pending_media(&state.0, &media_root_for_blocking, &emit_media)?;
 
             Ok(IngestionSummary {
                 job_id: job_id_for_blocking.clone(),

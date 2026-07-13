@@ -174,7 +174,7 @@ function MessageBubble({ message, isGroup }: { message: ChatMessage; isGroup: bo
                 {text ? <p>{text}</p> : null}
               </div>
             ) : (
-              text || <span className="text-slate-400 dark:text-slate-500">Message content unavailable</span>
+              text
             )}
           </div>
           <div className="inline-flex min-h-[2.75rem] items-center px-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400 opacity-0 transition duration-150 group-hover:opacity-100">

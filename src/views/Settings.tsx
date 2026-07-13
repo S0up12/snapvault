@@ -1,10 +1,23 @@
 import { invoke } from "@tauri-apps/api/core";
 import { confirm } from "@tauri-apps/plugin-dialog";
-import { AlertCircle, AlertTriangle, CheckCircle2, LoaderCircle, RefreshCcw, ShieldCheck, Trash2 } from "lucide-react";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import {
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  FolderCog,
+  FolderOpen,
+  LoaderCircle,
+  RefreshCcw,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 
+import StorageChoiceModal from "../components/StorageChoiceModal";
 import ThumbnailGenerator from "../components/ThumbnailGenerator";
 import { useLibraryStats } from "../hooks/useLibraryStats";
+import { useStorageInfo } from "../hooks/useStorageSettings";
 
 type VerifySummary = {
   checked: number;
@@ -29,6 +42,7 @@ export default function Settings() {
   return (
     <div className="space-y-4">
       <LibraryStatsPanel />
+      <StorageLocationPanel />
       <ThumbnailGenerator />
       <VerifyLibraryPanel />
       <DangerZonePanel />
@@ -115,6 +129,79 @@ function LibraryStatsPanel() {
           <Stat label="Database size" value={formatBytes(stats.db_size_bytes)} />
         </div>
       )}
+    </Panel>
+  );
+}
+
+function StorageLocationPanel() {
+  const { info, error, refresh } = useStorageInfo();
+  const { stats } = useLibraryStats();
+  const [showChoiceModal, setShowChoiceModal] = useState(false);
+
+  const hasAssets = (stats?.total_assets ?? 0) > 0;
+
+  return (
+    <Panel
+      title="Storage"
+      description="Your database (a few MB, metadata only) always stays in SnapVault's app-data folder. This only controls where your photos, videos, chat attachments, and thumbnails are stored."
+    >
+      {error ? (
+        <p className="text-sm text-red-500">Failed to load storage settings: {error}</p>
+      ) : !info ? (
+        <div className="flex items-center justify-center py-6 text-slate-400 dark:text-slate-500">
+          <LoaderCircle className="h-5 w-5 animate-spin" />
+        </div>
+      ) : (
+        <>
+          <div className="rounded-[1.1rem] border border-slate-200/70 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.035]">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              Media location {info.is_default ? "(default)" : "(custom)"}
+            </p>
+            <p className="mt-1 truncate text-sm text-slate-800 dark:text-slate-200" title={info.media_root}>
+              {info.media_root}
+            </p>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => revealItemInDir(info.media_root)}
+              className="inline-flex items-center gap-2 rounded-[1rem] border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
+            >
+              <FolderOpen className="h-4 w-4" />
+              Open folder
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowChoiceModal(true)}
+              disabled={hasAssets}
+              className="inline-flex items-center gap-2 rounded-[1rem] border border-sky-300/30 bg-sky-500/10 px-4 py-2 text-sm font-medium text-sky-700 transition hover:border-sky-400/45 hover:bg-sky-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:text-sky-200"
+            >
+              <FolderCog className="h-4 w-4" />
+              Change location
+            </button>
+          </div>
+
+          {hasAssets ? (
+            <p className="mt-3 text-xs text-slate-400 dark:text-slate-500">
+              Reset the library in the Danger Zone below before changing the storage location.
+            </p>
+          ) : null}
+        </>
+      )}
+
+      {showChoiceModal && info ? (
+        <StorageChoiceModal
+          defaultPath={info.media_root}
+          allowCancel
+          onCancel={() => setShowChoiceModal(false)}
+          onChosen={() => {
+            setShowChoiceModal(false);
+            void refresh();
+          }}
+        />
+      ) : null}
     </Panel>
   );
 }

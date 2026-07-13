@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 
 use rusqlite::Connection;
 use serde::Serialize;
@@ -46,6 +47,7 @@ pub struct ThumbnailSummary {
 
 struct PendingAsset {
     id: String,
+    media_type: String,
     original_path: String,
     overlay_path: Option<String>,
     needs_thumbnail: bool,
@@ -77,8 +79,13 @@ fn emit_progress(app: &AppHandle, processed: usize, total: usize, message: Strin
 /// manual step - it only remains for reprocessing older imports or retrying
 /// failures. `emit(processed, total, message)` reports progress; pass
 /// `&|_, _, _| {}` to run silently.
+/// Takes the DB mutex rather than an already-locked `Connection`: each asset
+/// in the loop below needs the DB only for a quick read/write either side of
+/// its (slow) ffmpeg call, and re-locking per asset instead of holding one
+/// guard for the whole batch means other commands (`list_memory_assets`,
+/// `list_chat_threads`, ...) aren't frozen out for the entire run.
 pub(crate) fn process_pending_media(
-    conn: &Connection,
+    db: &Mutex<Connection>,
     app_data_dir: &Path,
     emit: &dyn Fn(usize, usize, String),
 ) -> Result<ThumbnailSummary, String> {
@@ -90,7 +97,10 @@ pub(crate) fn process_pending_media(
         )
     })?;
 
-    let pending = load_pending_assets(conn)?;
+    let pending = {
+        let conn = db.lock().map_err(|err| err.to_string())?;
+        load_pending_assets(&conn)?
+    };
     let total = pending.len();
     emit(0, total, "Processing media".to_string());
 
@@ -118,10 +128,37 @@ pub(crate) fn process_pending_media(
     let mut playback_transcoded = 0usize;
     let mut playback_failed = 0usize;
     for (index, asset) in pending.iter().enumerate() {
+        // Snapchat voice notes are exported as audio-only .mp4 containers,
+        // which `media_type_for_extension` classifies as `video` since it
+        // only looks at the extension - there's no video stream for ffmpeg
+        // to grab a frame from or transcode. Reclassify on sight instead of
+        // retrying a doomed thumbnail/transcode every single run. A probe
+        // error defaults to "has video" so a flaky ffprobe call doesn't
+        // wrongly reclassify a real video.
+        if asset.media_type == "video"
+            && (asset.needs_thumbnail || asset.needs_playback)
+            && !has_video_stream(Path::new(&asset.original_path)).unwrap_or(true)
+        {
+            let conn = db.lock().map_err(|err| err.to_string())?;
+            conn.execute(
+                "UPDATE assets SET media_type = 'audio' WHERE id = ?1",
+                rusqlite::params![asset.id],
+            )
+            .map_err(|err| format!("failed to reclassify asset {}: {err}", asset.id))?;
+            drop(conn);
+
+            let processed = index + 1;
+            if processed % emit_step == 0 || processed == total {
+                emit(processed, total, format!("Processing media {processed}/{total}"));
+            }
+            continue;
+        }
+
         if asset.needs_thumbnail {
             let output_path = thumbnail_dir.join(format!("{}.webp", asset.id));
             match generate_one_thumbnail(asset, &output_path) {
                 Ok(()) => {
+                    let conn = db.lock().map_err(|err| err.to_string())?;
                     conn.execute(
                         "UPDATE assets SET thumbnail_path = ?1 WHERE id = ?2",
                         rusqlite::params![output_path.display().to_string(), asset.id],
@@ -141,6 +178,7 @@ pub(crate) fn process_pending_media(
         if asset.needs_playback {
             match ensure_playback_copy(asset, &playback_dir) {
                 Ok(Some(playback_path)) => {
+                    let conn = db.lock().map_err(|err| err.to_string())?;
                     conn.execute(
                         "UPDATE assets SET playback_path = ?1 WHERE id = ?2",
                         rusqlite::params![playback_path.display().to_string(), asset.id],
@@ -185,17 +223,13 @@ pub async fn generate_thumbnails(app: AppHandle) -> Result<ThumbnailSummary, Str
     let app_for_blocking = app.clone();
     let result = tauri::async_runtime::spawn_blocking(
         move || -> Result<ThumbnailSummary, String> {
-            let app_data_dir = app_for_blocking
-                .path()
-                .app_data_dir()
-                .map_err(|err| format!("failed to resolve app data dir: {err}"))?;
+            let media_root = crate::storage::resolve_media_root(&app_for_blocking)?;
             let state = app_for_blocking.state::<DbState>();
-            let conn = state.0.lock().map_err(|err| err.to_string())?;
 
             let emit = |processed: usize, total: usize, message: String| {
                 emit_progress(&app_for_blocking, processed, total, message);
             };
-            process_pending_media(&conn, &app_data_dir, &emit)
+            process_pending_media(&state.0, &media_root, &emit)
         },
     )
     .await
@@ -226,7 +260,7 @@ pub async fn generate_thumbnails(app: AppHandle) -> Result<ThumbnailSummary, Str
 fn load_pending_assets(conn: &Connection) -> Result<Vec<PendingAsset>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, original_path, overlay_path,
+            "SELECT id, media_type, original_path, overlay_path,
                     thumbnail_path IS NULL,
                     media_type = 'video' AND playback_path IS NULL
              FROM assets
@@ -238,16 +272,47 @@ fn load_pending_assets(conn: &Connection) -> Result<Vec<PendingAsset>, String> {
         .query_map([], |row| {
             Ok(PendingAsset {
                 id: row.get(0)?,
-                original_path: row.get(1)?,
-                overlay_path: row.get(2)?,
-                needs_thumbnail: row.get(3)?,
-                needs_playback: row.get(4)?,
+                media_type: row.get(1)?,
+                original_path: row.get(2)?,
+                overlay_path: row.get(3)?,
+                needs_thumbnail: row.get(4)?,
+                needs_playback: row.get(5)?,
             })
         })
         .map_err(|err| err.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|err| err.to_string())?;
     Ok(rows)
+}
+
+/// Probes for at least one video stream via ffprobe. Snapchat voice-note
+/// chat attachments are audio-only .mp4 containers that `process_pending_media`
+/// uses this to detect and reclassify (see its doc comment).
+fn has_video_stream(path: &Path) -> Result<bool, String> {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v", "error",
+            "-select_streams", "v",
+            "-show_entries", "stream=codec_type",
+            "-of", "json",
+        ])
+        .arg(path)
+        .output()
+        .map_err(|err| format!("failed to run ffprobe (is it installed and on PATH?): {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "ffprobe exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    let payload: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|err| format!("failed to parse ffprobe output: {err}"))?;
+    Ok(payload
+        .get("streams")
+        .and_then(|v| v.as_array())
+        .map(|streams| !streams.is_empty())
+        .unwrap_or(false))
 }
 
 /// Ensures `asset` has a browser-decodable copy of its video, remuxing or
@@ -266,7 +331,10 @@ fn ensure_playback_copy(asset: &PendingAsset, playback_dir: &Path) -> Result<Opt
     }
 
     let output_path = playback_dir.join(format!("{}.mp4", asset.id));
-    let tmp_path = playback_dir.join(format!("{}.mp4.tmp", asset.id));
+    // Must end in `.mp4`, not `.mp4.tmp` - ffmpeg picks its output muxer from
+    // the destination filename's extension, and ".tmp" isn't a container
+    // format it recognizes ("Unable to choose an output format").
+    let tmp_path = playback_dir.join(format!("{}.tmp.mp4", asset.id));
 
     let output = Command::new("ffmpeg")
         .args(["-y", "-i"])
@@ -441,12 +509,23 @@ mod tests {
         assert_eq!(ids.len(), 2);
         assert!(ids.contains(&"img"));
         assert!(ids.contains(&"vid"));
+        assert_eq!(
+            pending.iter().find(|a| a.id == "vid").unwrap().media_type,
+            "video"
+        );
+    }
+
+    #[test]
+    fn has_video_stream_reports_missing_source_file() {
+        let err = has_video_stream(Path::new("/does/not/exist.mp4")).unwrap_err();
+        assert!(err.contains("ffprobe exited"));
     }
 
     #[test]
     fn generate_one_thumbnail_reports_missing_source_file() {
         let asset = PendingAsset {
             id: "missing".to_string(),
+            media_type: "image".to_string(),
             original_path: "/does/not/exist.jpg".to_string(),
             overlay_path: None,
             needs_thumbnail: true,
@@ -483,9 +562,49 @@ mod tests {
     }
 
     #[test]
+    fn ensure_playback_copy_produces_a_playable_file_not_a_muxer_error() {
+        // Regression test for a bug where the temp output path ended in
+        // `.mp4.tmp` - ffmpeg picks its output muxer from the destination
+        // filename's extension, so ".tmp" made every transcode fail with
+        // "Unable to choose an output format", silently breaking playback
+        // conversion for every video in the library.
+        let tmp_dir = std::env::temp_dir().join(format!("snapvault-playback-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+
+        // A tiny synthetic clip encoded as mpeg4 (not h264), so it needs transcoding.
+        let input_path = tmp_dir.join("input.mp4");
+        let gen = Command::new("ffmpeg")
+            .args(["-y", "-f", "lavfi", "-i", "color=c=blue:s=64x64:d=1", "-c:v", "mpeg4", "-pix_fmt", "yuv420p"])
+            .arg(&input_path)
+            .output()
+            .expect("failed to run ffmpeg to build test fixture (is it installed and on PATH?)");
+        assert!(gen.status.success(), "fixture generation failed: {}", String::from_utf8_lossy(&gen.stderr));
+
+        let asset = PendingAsset {
+            id: "playback-test".to_string(),
+            media_type: "video".to_string(),
+            original_path: input_path.display().to_string(),
+            overlay_path: None,
+            needs_thumbnail: false,
+            needs_playback: true,
+        };
+
+        let playback_dir = tmp_dir.join("playback");
+        std::fs::create_dir_all(&playback_dir).unwrap();
+
+        let result = ensure_playback_copy(&asset, &playback_dir).unwrap();
+        let output_path = result.expect("mpeg4 input should need a playback-safe transcode");
+        assert!(output_path.is_file());
+        assert!(std::fs::metadata(&output_path).unwrap().len() > 0);
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
     fn ensure_playback_copy_reports_missing_source_file() {
         let asset = PendingAsset {
             id: "missing".to_string(),
+            media_type: "video".to_string(),
             original_path: "/does/not/exist.mp4".to_string(),
             overlay_path: None,
             needs_thumbnail: false,

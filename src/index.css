@@ -1,1 +1,26 @@
 @import "tailwindcss";
+
+/* Global scrollbar theming - Tauri's Windows webview is Chromium (WebView2),
+   so the `-webkit-scrollbar` pseudo-elements apply everywhere in the app. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: white transparent;
+}
+
+::-webkit-scrollbar,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: white;
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+}

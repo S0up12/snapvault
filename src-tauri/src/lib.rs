@@ -4,6 +4,7 @@ mod ingestion;
 mod library;
 mod maintenance;
 mod profile;
+mod storage;
 mod thumbnails;
 
 use std::sync::Mutex;
@@ -14,6 +15,7 @@ use ingestion::run_ingestion;
 use library::{list_memory_assets, list_memory_tags, set_asset_favorite, set_asset_tags};
 use maintenance::{get_library_stats, reset_library, verify_library};
 use profile::get_profile_snapshot;
+use storage::{get_storage_info, set_media_root};
 use tauri::Manager;
 use thumbnails::generate_thumbnails;
 
@@ -52,6 +54,15 @@ pub fn run() {
         .setup(|app| {
             let conn = db::init(&app.handle())?;
             app.manage(DbState(Mutex::new(conn)));
+
+            // Widen the (in-memory, never-persisted) asset-protocol scope to
+            // cover whatever media root resolves at this launch - the static
+            // tauri.conf.json scope only covers the default AppData case, and
+            // this call is what lets a previously-chosen custom root's
+            // thumbnails/playback/imports load via convertFileSrc.
+            let media_root = storage::resolve_media_root(&app.handle())?;
+            storage::widen_asset_protocol_scope(&app.handle(), &media_root)?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -69,7 +80,9 @@ pub fn run() {
             get_profile_snapshot,
             get_library_stats,
             verify_library,
-            reset_library
+            reset_library,
+            get_storage_info,
+            set_media_root
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
