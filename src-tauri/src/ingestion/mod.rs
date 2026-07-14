@@ -12,7 +12,7 @@ use uuid::Uuid;
 use zip::ZipArchive;
 
 use crate::db::DbState;
-use crate::thumbnails::process_pending_media;
+use crate::thumbnails::{acquire_media_processing_slot, process_pending_media, release_media_processing_slot};
 
 const PROGRESS_EVENT: &str = "ingestion://progress";
 
@@ -223,8 +223,14 @@ pub async fn run_ingestion(
                     message,
                 );
             };
-            let media_summary =
-                process_pending_media(&state.0, &media_root_for_blocking, &emit_media)?;
+            // Waits its turn rather than erroring if the startup auto-resume
+            // (or a manual "Reprocess media" click) already holds this slot -
+            // both would otherwise pull the same pending assets and race
+            // writing the same `{id}.tmp.mp4` output paths.
+            acquire_media_processing_slot(&app_for_blocking);
+            let media_summary = process_pending_media(&state.0, &media_root_for_blocking, &emit_media);
+            release_media_processing_slot(&app_for_blocking);
+            let media_summary = media_summary?;
 
             Ok(IngestionSummary {
                 job_id: job_id_for_blocking.clone(),

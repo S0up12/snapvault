@@ -17,7 +17,7 @@ use maintenance::{get_library_stats, reset_library, verify_library};
 use profile::get_profile_snapshot;
 use storage::{get_storage_info, set_media_root};
 use tauri::Manager;
-use thumbnails::generate_thumbnails;
+use thumbnails::{generate_thumbnails, resume_pending_media_on_startup, MediaProcessingState};
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -62,6 +62,9 @@ pub fn run() {
             // thumbnails/playback/imports load via convertFileSrc.
             let media_root = storage::resolve_media_root(&app.handle())?;
             storage::widen_asset_protocol_scope(&app.handle(), &media_root)?;
+
+            app.manage(MediaProcessingState::default());
+            resume_pending_media_on_startup(app.handle().clone());
 
             Ok(())
         })

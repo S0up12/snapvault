@@ -2,21 +2,42 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { ChevronLeft, ChevronRight, Star, Tags, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { MemoryAsset } from "../hooks/useMemories";
 import { formatDayGroup } from "../hooks/useMemories";
 
-type LightboxProps = {
-  assets: MemoryAsset[];
+// The fields Lightbox actually reads - Memories' MemoryAsset and Chats' chat
+// media (adapted with the message's sent_at as taken_at) both satisfy this,
+// so the same viewer works for either without either hook depending on the
+// other's shape.
+export type LightboxAsset = {
+  id: string;
+  media_type: "image" | "video" | "audio";
+  original_path: string;
+  overlay_path: string | null;
+  playback_path: string | null;
+  taken_at: string | null;
+  is_favorite?: boolean;
+};
+
+type LightboxProps<T extends LightboxAsset> = {
+  assets: T[];
   currentIndex: number;
   onClose: () => void;
   onNavigate: (nextIndex: number) => void;
-  onToggleFavorite: (asset: MemoryAsset) => void;
-  onEditTags: (asset: MemoryAsset) => void;
+  /** Omit where there's nothing sensible to favorite/tag (e.g. chat media) - the buttons only render when provided. */
+  onToggleFavorite?: (asset: T) => void;
+  onEditTags?: (asset: T) => void;
 };
 
 const VIEWPORT_MARGIN = { width: 96, height: 220 };
 
-export default function Lightbox({ assets, currentIndex, onClose, onNavigate, onToggleFavorite, onEditTags }: LightboxProps) {
+export default function Lightbox<T extends LightboxAsset>({
+  assets,
+  currentIndex,
+  onClose,
+  onNavigate,
+  onToggleFavorite,
+  onEditTags,
+}: LightboxProps<T>) {
   const asset = assets[currentIndex];
   const [mediaBox, setMediaBox] = useState<{ width: number; height: number } | null>(null);
 
@@ -58,6 +79,7 @@ export default function Lightbox({ assets, currentIndex, onClose, onNavigate, on
   }
 
   const isVideo = asset.media_type === "video";
+  const isAudio = asset.media_type === "audio";
   const mediaUrl = convertFileSrc(asset.playback_path ?? asset.original_path);
   const overlayUrl = asset.overlay_path ? convertFileSrc(asset.overlay_path) : null;
   const date = formatDayGroup(asset.taken_at);
@@ -73,29 +95,33 @@ export default function Lightbox({ assets, currentIndex, onClose, onNavigate, on
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">Viewer</p>
             <div className="mt-2 flex items-center gap-3">
               <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-slate-100">
-                {isVideo ? "Video" : "Photo"}
+                {isVideo ? "Video" : isAudio ? "Voice message" : "Photo"}
               </span>
               <p className="text-sm text-slate-300">{date.label}</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onEditTags(asset)}
-              className="rounded-2xl border border-white/10 bg-white/[0.05] px-3 py-2 text-slate-200 transition hover:bg-white/[0.1]"
-              title="Edit tags"
-            >
-              <Tags className="h-4.5 w-4.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => onToggleFavorite(asset)}
-              className="rounded-2xl border border-white/10 bg-white/[0.05] px-3 py-2 text-slate-200 transition hover:bg-white/[0.1]"
-              title={asset.is_favorite ? "Unfavorite" : "Favorite"}
-            >
-              <Star className={asset.is_favorite ? "h-4.5 w-4.5 fill-amber-300 text-amber-300" : "h-4.5 w-4.5"} />
-            </button>
+            {onEditTags ? (
+              <button
+                type="button"
+                onClick={() => onEditTags(asset)}
+                className="rounded-2xl border border-white/10 bg-white/[0.05] px-3 py-2 text-slate-200 transition hover:bg-white/[0.1]"
+                title="Edit tags"
+              >
+                <Tags className="h-4.5 w-4.5" />
+              </button>
+            ) : null}
+            {onToggleFavorite ? (
+              <button
+                type="button"
+                onClick={() => onToggleFavorite(asset)}
+                className="rounded-2xl border border-white/10 bg-white/[0.05] px-3 py-2 text-slate-200 transition hover:bg-white/[0.1]"
+                title={asset.is_favorite ? "Unfavorite" : "Favorite"}
+              >
+                <Star className={asset.is_favorite ? "h-4.5 w-4.5 fill-amber-300 text-amber-300" : "h-4.5 w-4.5"} />
+              </button>
+            ) : null}
             <span className="hidden rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-xs uppercase tracking-[0.2em] text-slate-400 sm:inline-flex">
               {currentIndex + 1} / {assets.length}
             </span>
@@ -153,6 +179,10 @@ export default function Lightbox({ assets, currentIndex, onClose, onNavigate, on
                   }}
                   className="col-start-1 row-start-1 block h-full w-full rounded-[1.5rem] object-contain"
                 />
+              ) : isAudio ? (
+                <div className="col-start-1 row-start-1 flex h-full w-full min-h-[10rem] min-w-[16rem] flex-col items-center justify-center gap-4 rounded-[1.5rem] bg-white/[0.03] p-8">
+                  <audio key={asset.id} src={mediaUrl} controls preload="metadata" autoPlay className="w-full max-w-sm" />
+                </div>
               ) : (
                 <img
                   key={asset.id}

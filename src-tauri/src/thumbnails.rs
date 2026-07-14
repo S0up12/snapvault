@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use rusqlite::Connection;
@@ -45,11 +46,22 @@ pub struct ThumbnailSummary {
     pub playback_failed: usize,
 }
 
+/// Tracks whether `process_pending_media` is currently running, so the
+/// startup auto-resume and a manual "Reprocess media" click can't overlap -
+/// both would otherwise pull the same pending assets and race writing the
+/// same `{id}.tmp.mp4` output paths.
+#[derive(Default)]
+pub struct MediaProcessingState(AtomicBool);
+
 struct PendingAsset {
     id: String,
     media_type: String,
     original_path: String,
     overlay_path: Option<String>,
+    /// Non-`None` only for the older side-by-side scheme, where it points at
+    /// a separate `playback/{id}.mp4` rather than `original_path` itself -
+    /// `ensure_playback_copy` folds those in instead of re-encoding.
+    playback_path: Option<String>,
     needs_thumbnail: bool,
     needs_playback: bool,
 }
@@ -114,11 +126,6 @@ pub(crate) fn process_pending_media(
         });
     }
 
-    let playback_dir = app_data_dir.join("playback");
-    std::fs::create_dir_all(&playback_dir).map_err(|err| {
-        format!("failed to create playback dir {}: {err}", playback_dir.display())
-    })?;
-
     // Same IPC-flooding guard as the ingestion progress events: cap updates
     // to ~200 regardless of library size.
     let emit_step = (total / 200).max(1);
@@ -176,16 +183,24 @@ pub(crate) fn process_pending_media(
         }
 
         if asset.needs_playback {
-            match ensure_playback_copy(asset, &playback_dir) {
-                Ok(Some(playback_path)) => {
+            match ensure_playback_copy(asset) {
+                Ok(Some(final_path)) => {
+                    let final_path = final_path.display().to_string();
                     let conn = db.lock().map_err(|err| err.to_string())?;
-                    conn.execute(
-                        "UPDATE assets SET playback_path = ?1 WHERE id = ?2",
-                        rusqlite::params![playback_path.display().to_string(), asset.id],
-                    )
-                    .map_err(|err| {
-                        format!("failed to update playback_path for {}: {err}", asset.id)
-                    })?;
+                    let result = if final_path == asset.original_path {
+                        conn.execute(
+                            "UPDATE assets SET playback_path = ?1 WHERE id = ?2",
+                            rusqlite::params![final_path, asset.id],
+                        )
+                    } else {
+                        // Extension had to change (source wasn't .mp4/.m4v) -
+                        // original_path now points at a renamed file too.
+                        conn.execute(
+                            "UPDATE assets SET original_path = ?1, playback_path = ?1 WHERE id = ?2",
+                            rusqlite::params![final_path, asset.id],
+                        )
+                    };
+                    result.map_err(|err| format!("failed to update playback_path for {}: {err}", asset.id))?;
                     playback_transcoded += 1;
                 }
                 Ok(None) => {
@@ -213,13 +228,33 @@ pub(crate) fn process_pending_media(
     })
 }
 
-/// Tauri command wrapping `process_pending_media` for manual reprocessing:
-/// backfilling libraries imported before this feature existed, or retrying
-/// assets that failed. New imports process automatically via `run_ingestion`.
-/// Runs on a background thread via `spawn_blocking` since it shells out to
-/// ffmpeg/ffprobe per asset and waits on each child process.
-#[tauri::command]
-pub async fn generate_thumbnails(app: AppHandle) -> Result<ThumbnailSummary, String> {
+/// Blocks (briefly polling) until no other `process_pending_media` run holds
+/// `MediaProcessingState`, then claims it. `run_ingestion`'s media phase uses
+/// this - unlike the manual command/startup resume below, it can't just bail
+/// out with "already running" mid-import, so it waits its turn instead.
+pub(crate) fn acquire_media_processing_slot(app: &AppHandle) {
+    let state = app.state::<MediaProcessingState>();
+    while state.0.swap(true, Ordering::SeqCst) {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
+pub(crate) fn release_media_processing_slot(app: &AppHandle) {
+    app.state::<MediaProcessingState>().0.store(false, Ordering::SeqCst);
+}
+
+/// Shared by the manual `generate_thumbnails` command and the startup
+/// auto-resume task. Guards against both running at once (and against either
+/// racing `run_ingestion`'s media phase - see `acquire_media_processing_slot`)
+/// via `MediaProcessingState`, then runs `process_pending_media` on a
+/// background thread (it shells out to ffmpeg/ffprobe per asset and waits on
+/// each child process) and emits the same `thumbnails://progress` events
+/// either way.
+async fn run_and_emit(app: AppHandle) -> Result<ThumbnailSummary, String> {
+    if app.state::<MediaProcessingState>().0.swap(true, Ordering::SeqCst) {
+        return Err("Media processing is already running.".to_string());
+    }
+
     let app_for_blocking = app.clone();
     let result = tauri::async_runtime::spawn_blocking(
         move || -> Result<ThumbnailSummary, String> {
@@ -233,7 +268,10 @@ pub async fn generate_thumbnails(app: AppHandle) -> Result<ThumbnailSummary, Str
         },
     )
     .await
-    .map_err(|err| format!("thumbnail generation task panicked: {err}"))?;
+    .map_err(|err| format!("thumbnail generation task panicked: {err}"));
+
+    release_media_processing_slot(&app);
+    let result = result.and_then(|inner| inner);
 
     match &result {
         Ok(summary) => {
@@ -257,15 +295,44 @@ pub async fn generate_thumbnails(app: AppHandle) -> Result<ThumbnailSummary, Str
     result
 }
 
+/// Tauri command wrapping `run_and_emit` for manual reprocessing: backfilling
+/// libraries imported before this feature existed, or retrying assets that
+/// failed. New imports process automatically via `run_ingestion`, and any
+/// backlog left over from an interrupted run resumes automatically at startup
+/// (see `resume_pending_media_on_startup`) - this remains for triggering a
+/// retry on demand without restarting the app.
+#[tauri::command]
+pub async fn generate_thumbnails(app: AppHandle) -> Result<ThumbnailSummary, String> {
+    run_and_emit(app).await
+}
+
+/// Resumes any unfinished media processing left over from a prior run (the
+/// app closing or crashing mid-batch, evidenced by orphaned `.tmp.mp4` files
+/// and videos stuck without a `playback_path`) without waiting for someone to
+/// notice and click "Reprocess media". Fire-and-forget: errors are logged,
+/// not surfaced to any caller, since there isn't one at startup.
+pub fn resume_pending_media_on_startup(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        if let Err(err) = run_and_emit(app).await {
+            eprintln!("[thumbnails] startup auto-resume failed: {err}");
+        }
+    });
+}
+
 fn load_pending_assets(conn: &Connection) -> Result<Vec<PendingAsset>, String> {
+    // `playback_path IS NOT NULL AND playback_path != original_path` catches
+    // assets left over from the older side-by-side scheme (a separate
+    // `playback/{id}.mp4`, HEVC original untouched) - `needs_playback` covers
+    // both that migration case and "never processed at all" (NULL).
     let mut stmt = conn
         .prepare(
-            "SELECT id, media_type, original_path, overlay_path,
+            "SELECT id, media_type, original_path, overlay_path, playback_path,
                     thumbnail_path IS NULL,
-                    media_type = 'video' AND playback_path IS NULL
+                    media_type = 'video' AND (playback_path IS NULL OR playback_path != original_path)
              FROM assets
              WHERE media_type IN ('image', 'video')
-               AND (thumbnail_path IS NULL OR (media_type = 'video' AND playback_path IS NULL))",
+               AND (thumbnail_path IS NULL
+                    OR (media_type = 'video' AND (playback_path IS NULL OR playback_path != original_path)))",
         )
         .map_err(|err| err.to_string())?;
     let rows = stmt
@@ -275,8 +342,9 @@ fn load_pending_assets(conn: &Connection) -> Result<Vec<PendingAsset>, String> {
                 media_type: row.get(1)?,
                 original_path: row.get(2)?,
                 overlay_path: row.get(3)?,
-                needs_thumbnail: row.get(4)?,
-                needs_playback: row.get(5)?,
+                playback_path: row.get(4)?,
+                needs_thumbnail: row.get(5)?,
+                needs_playback: row.get(6)?,
             })
         })
         .map_err(|err| err.to_string())?
@@ -315,13 +383,39 @@ fn has_video_stream(path: &Path) -> Result<bool, String> {
         .unwrap_or(false))
 }
 
-/// Ensures `asset` has a browser-decodable copy of its video, remuxing or
-/// transcoding into `playback_dir/{id}.mp4` when the source isn't already
-/// H.264/AAC in an mp4 container - mirrors the old Python
-/// `MediaProcessor.ensure_browser_playback`. Returns `Ok(None)` when the
-/// source is already playback-safe (nothing to store).
-fn ensure_playback_copy(asset: &PendingAsset, playback_dir: &Path) -> Result<Option<PathBuf>, String> {
+/// Ensures `asset.original_path` is browser-decodable, transcoding H.264/AAC
+/// directly over the original file when it isn't - unlike an earlier version
+/// of this function, which wrote a second copy to a separate
+/// `playback/{id}.mp4` and left the untouched HEVC original in place,
+/// permanently doubling disk usage for every converted video. Mirrors the old
+/// Python `MediaProcessor.ensure_browser_playback`, minus the duplication.
+/// Returns `Ok(None)` when nothing needed to change (already playback-safe).
+fn ensure_playback_copy(asset: &PendingAsset) -> Result<Option<PathBuf>, String> {
     let input = PathBuf::from(&asset.original_path);
+
+    // A side-by-side copy from before this function transcoded in place: it's
+    // already fully converted, so just fold it onto the original - no
+    // re-encode, just a rename.
+    if let Some(existing) = asset.playback_path.as_deref() {
+        if existing != asset.original_path {
+            let existing_path = PathBuf::from(existing);
+            if !existing_path.is_file() {
+                return Err(format!(
+                    "previously-converted playback copy missing: {}",
+                    existing_path.display()
+                ));
+            }
+            std::fs::rename(&existing_path, &input).map_err(|err| {
+                format!(
+                    "failed to fold playback copy {} into {}: {err}",
+                    existing_path.display(),
+                    input.display()
+                )
+            })?;
+            return Ok(Some(input));
+        }
+    }
+
     if !input.is_file() {
         return Err(format!("source file missing: {}", input.display()));
     }
@@ -330,11 +424,20 @@ fn ensure_playback_copy(asset: &PendingAsset, playback_dir: &Path) -> Result<Opt
         return Ok(None);
     }
 
-    let output_path = playback_dir.join(format!("{}.mp4", asset.id));
+    let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("asset");
+    let parent = input.parent().unwrap_or_else(|| Path::new("."));
+    let extension_ok = input
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| PLAYBACK_SAFE_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
+        .unwrap_or(false);
+    // Same directory as the source, not a separate `playback/` folder - the
+    // whole point of transcoding in place is ending up with one file, not two.
+    let final_path = if extension_ok { input.clone() } else { parent.join(format!("{stem}.mp4")) };
     // Must end in `.mp4`, not `.mp4.tmp` - ffmpeg picks its output muxer from
     // the destination filename's extension, and ".tmp" isn't a container
     // format it recognizes ("Unable to choose an output format").
-    let tmp_path = playback_dir.join(format!("{}.tmp.mp4", asset.id));
+    let tmp_path = parent.join(format!("{stem}.snapvault-tmp.mp4"));
 
     let output = Command::new("ffmpeg")
         .args(["-y", "-i"])
@@ -356,10 +459,19 @@ fn ensure_playback_copy(asset: &PendingAsset, playback_dir: &Path) -> Result<Opt
         ));
     }
 
-    std::fs::rename(&tmp_path, &output_path)
-        .map_err(|err| format!("failed to finalize playback copy {}: {err}", output_path.display()))?;
+    // `fs::rename` overwrites an existing destination on both Windows and
+    // Unix, so when `final_path == input` this replaces the HEVC original
+    // with the H.264 copy directly instead of leaving a second file behind.
+    std::fs::rename(&tmp_path, &final_path)
+        .map_err(|err| format!("failed to finalize playback copy {}: {err}", final_path.display()))?;
 
-    Ok(Some(output_path))
+    if final_path != input {
+        // Extension had to change (source wasn't .mp4/.m4v) - the original
+        // still exists under its old name, now redundant.
+        let _ = std::fs::remove_file(&input);
+    }
+
+    Ok(Some(final_path))
 }
 
 /// Runs `ffprobe` against `path` and returns whether it needs a playback
@@ -528,6 +640,7 @@ mod tests {
             media_type: "image".to_string(),
             original_path: "/does/not/exist.jpg".to_string(),
             overlay_path: None,
+            playback_path: None,
             needs_thumbnail: true,
             needs_playback: false,
         };
@@ -562,7 +675,29 @@ mod tests {
     }
 
     #[test]
-    fn ensure_playback_copy_produces_a_playable_file_not_a_muxer_error() {
+    fn load_pending_assets_picks_up_old_side_by_side_playback_copies_for_migration() {
+        // A video converted by the older side-by-side scheme has
+        // playback_path pointing at a separate file, not original_path -
+        // still needs picking up so it gets folded in and the duplicate
+        // reclaimed, not left alone forever.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        conn.execute(
+            "INSERT INTO assets (id, media_type, original_path, thumbnail_path, playback_path)
+             VALUES ('vid', 'video', '/b.mp4', '/b.webp', '/playback/vid.mp4')",
+            [],
+        )
+        .unwrap();
+
+        let pending = load_pending_assets(&conn).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert!(!pending[0].needs_thumbnail);
+        assert!(pending[0].needs_playback);
+        assert_eq!(pending[0].playback_path.as_deref(), Some("/playback/vid.mp4"));
+    }
+
+    #[test]
+    fn ensure_playback_copy_transcodes_in_place_not_a_muxer_error() {
         // Regression test for a bug where the temp output path ended in
         // `.mp4.tmp` - ffmpeg picks its output muxer from the destination
         // filename's extension, so ".tmp" made every transcode fail with
@@ -579,23 +714,55 @@ mod tests {
             .output()
             .expect("failed to run ffmpeg to build test fixture (is it installed and on PATH?)");
         assert!(gen.status.success(), "fixture generation failed: {}", String::from_utf8_lossy(&gen.stderr));
+        let original_size = std::fs::metadata(&input_path).unwrap().len();
 
         let asset = PendingAsset {
             id: "playback-test".to_string(),
             media_type: "video".to_string(),
             original_path: input_path.display().to_string(),
             overlay_path: None,
+            playback_path: None,
             needs_thumbnail: false,
             needs_playback: true,
         };
 
-        let playback_dir = tmp_dir.join("playback");
-        std::fs::create_dir_all(&playback_dir).unwrap();
+        let result = ensure_playback_copy(&asset).unwrap();
+        let final_path = result.expect("mpeg4 input should need a playback-safe transcode");
 
-        let result = ensure_playback_copy(&asset, &playback_dir).unwrap();
-        let output_path = result.expect("mpeg4 input should need a playback-safe transcode");
-        assert!(output_path.is_file());
-        assert!(std::fs::metadata(&output_path).unwrap().len() > 0);
+        // Transcoded in place: same path, no second file, content replaced.
+        assert_eq!(final_path, input_path);
+        assert!(final_path.is_file());
+        assert_ne!(std::fs::metadata(&final_path).unwrap().len(), original_size);
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn ensure_playback_copy_folds_an_old_side_by_side_copy_in_without_reencoding() {
+        let tmp_dir = std::env::temp_dir().join(format!("snapvault-playback-migrate-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+
+        let original_path = tmp_dir.join("original.mp4");
+        std::fs::write(&original_path, b"stale hevc bytes").unwrap();
+        let old_playback_path = tmp_dir.join("old-playback-copy.mp4");
+        std::fs::write(&old_playback_path, b"already-converted h264 bytes").unwrap();
+
+        let asset = PendingAsset {
+            id: "migrate-test".to_string(),
+            media_type: "video".to_string(),
+            original_path: original_path.display().to_string(),
+            overlay_path: None,
+            playback_path: Some(old_playback_path.display().to_string()),
+            needs_thumbnail: false,
+            needs_playback: true,
+        };
+
+        let result = ensure_playback_copy(&asset).unwrap();
+        let final_path = result.expect("should fold the side-by-side copy in");
+
+        assert_eq!(final_path, original_path);
+        assert!(!old_playback_path.is_file(), "old side-by-side copy should be gone (renamed, not copied)");
+        assert_eq!(std::fs::read(&original_path).unwrap(), b"already-converted h264 bytes");
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
@@ -607,10 +774,11 @@ mod tests {
             media_type: "video".to_string(),
             original_path: "/does/not/exist.mp4".to_string(),
             overlay_path: None,
+            playback_path: None,
             needs_thumbnail: false,
             needs_playback: true,
         };
-        let err = ensure_playback_copy(&asset, Path::new(".")).unwrap_err();
+        let err = ensure_playback_copy(&asset).unwrap_err();
         assert!(err.contains("source file missing"));
     }
 }
