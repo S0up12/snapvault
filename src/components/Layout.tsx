@@ -3,85 +3,48 @@ import { useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 
 import Sidebar from "./Sidebar";
-
-const routeMeta: Record<string, { eyebrow: string; title: string }> = {
-  "/": {
-    eyebrow: "Overview",
-    title: "Dashboard",
-  },
-  "/profile": {
-    eyebrow: "Workspace",
-    title: "Profile",
-  },
-  "/chats": {
-    eyebrow: "Conversations",
-    title: "Chats",
-  },
-  "/memories": {
-    eyebrow: "Archive",
-    title: "Memories",
-  },
-  "/stories": {
-    eyebrow: "Archive",
-    title: "Stories",
-  },
-  "/settings": {
-    eyebrow: "Workspace",
-    title: "Settings",
-  },
-};
+import TitleBar from "./TitleBar";
 
 export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarHovered, setSidebarHovered] = useState(false);
   const location = useLocation();
   const isContainedScrollRoute = location.pathname === "/chats" || location.pathname === "/memories";
 
-  const header = routeMeta[location.pathname] ?? routeMeta["/"];
-
   return (
-    <div className="h-screen overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.08),_transparent_26%),linear-gradient(180deg,_#edf4fb,_#e6eef8_48%,_#dbe7f2)] text-slate-900 dark:bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.08),_transparent_26%),linear-gradient(180deg,_#06101a,_#04070c_48%,_#020407)] dark:text-slate-100">
-      <div className="flex h-full min-h-0">
-        <aside
-          className={[
-            "hidden shrink-0 border-r border-slate-200/70 bg-white/75 p-5 backdrop-blur dark:border-white/10 dark:bg-slate-950/70 xl:block",
-            sidebarCollapsed ? "w-24" : "w-[16.5rem]",
-          ].join(" ")}
+    <div className="flex h-screen flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.08),_transparent_26%),linear-gradient(180deg,_#edf4fb,_#e6eef8_48%,_#dbe7f2)] text-slate-900 dark:bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.08),_transparent_26%),linear-gradient(180deg,_#06101a,_#04070c_48%,_#020407)] dark:text-slate-100">
+      <TitleBar />
+
+      <div className="flex min-h-0 flex-1">
+        {/* Fixed-width slot reserves layout space for the collapsed sidebar so
+            main content never reflows; the expanded panel on hover overlays on
+            top of it instead (absolute), which is why it's a group. */}
+        <div
+          className="relative hidden w-24 shrink-0 xl:block"
+          onMouseEnter={() => setSidebarHovered(true)}
+          onMouseLeave={() => setSidebarHovered(false)}
         >
-          <Sidebar
-            collapsed={sidebarCollapsed}
-            onToggleCollapse={() => setSidebarCollapsed((value) => !value)}
-          />
-        </aside>
+          <aside
+            className={[
+              "absolute inset-y-0 left-0 z-40 border-r border-slate-200/70 bg-white/90 p-5 shadow-2xl shadow-slate-900/10 backdrop-blur transition-[width] duration-200 ease-out dark:border-white/10 dark:bg-slate-950/85 dark:shadow-black/40",
+              sidebarHovered ? "w-[16.5rem]" : "w-24",
+            ].join(" ")}
+          >
+            <Sidebar collapsed={!sidebarHovered} />
+          </aside>
+        </div>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-white/70 backdrop-blur dark:border-white/10 dark:bg-slate-950/55">
-            <div className="flex items-center justify-between gap-4 px-4 py-4 md:px-6 xl:px-8">
-              <div className="flex items-center gap-3 xl:hidden">
-                <button
-                  type="button"
-                  onClick={() => setMobileOpen(true)}
-                  className="inline-flex rounded-[1.1rem] border border-slate-200 bg-white/80 p-3 text-slate-700 transition hover:border-slate-300 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:border-white/15 dark:hover:bg-white/10"
-                  aria-label="Open navigation"
-                >
-                  <Menu className="h-5 w-5" />
-                </button>
-              </div>
-
-              <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-sky-700/70 dark:text-sky-200/65">
-                  {header.eyebrow}
-                </p>
-                <div className="mt-2 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-                  <div className="min-w-0">
-                    <h1 className="truncate text-2xl font-semibold tracking-tight text-slate-950 dark:text-white md:text-3xl">
-                      {header.title}
-                    </h1>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </header>
+          <div className="flex items-center gap-3 px-4 py-4 md:px-6 xl:hidden">
+            <button
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              className="inline-flex rounded-[1.1rem] border border-slate-200 bg-white/80 p-3 text-slate-700 transition hover:border-slate-300 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:border-white/15 dark:hover:bg-white/10"
+              aria-label="Open navigation"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+          </div>
 
           <main
             className={[
