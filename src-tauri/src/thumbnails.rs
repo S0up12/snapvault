@@ -9,6 +9,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::DbState;
+use crate::settings::PerformanceSettings;
 
 const PROGRESS_EVENT: &str = "thumbnails://progress";
 const THUMBNAIL_SIZE: &str = "360:360";
@@ -99,6 +100,7 @@ fn emit_progress(app: &AppHandle, processed: usize, total: usize, message: Strin
 pub(crate) fn process_pending_media(
     db: &Mutex<Connection>,
     app_data_dir: &Path,
+    settings: &PerformanceSettings,
     emit: &dyn Fn(usize, usize, String),
 ) -> Result<ThumbnailSummary, String> {
     let thumbnail_dir = app_data_dir.join("thumbnails");
@@ -163,7 +165,7 @@ pub(crate) fn process_pending_media(
 
         if asset.needs_thumbnail {
             let output_path = thumbnail_dir.join(format!("{}.webp", asset.id));
-            match generate_one_thumbnail(asset, &output_path) {
+            match generate_one_thumbnail(asset, &output_path, settings) {
                 Ok(()) => {
                     let conn = db.lock().map_err(|err| err.to_string())?;
                     conn.execute(
@@ -183,7 +185,7 @@ pub(crate) fn process_pending_media(
         }
 
         if asset.needs_playback {
-            match ensure_playback_copy(asset) {
+            match ensure_playback_copy(asset, settings) {
                 Ok(Some(final_path)) => {
                     let final_path = final_path.display().to_string();
                     let conn = db.lock().map_err(|err| err.to_string())?;
@@ -259,12 +261,13 @@ async fn run_and_emit(app: AppHandle) -> Result<ThumbnailSummary, String> {
     let result = tauri::async_runtime::spawn_blocking(
         move || -> Result<ThumbnailSummary, String> {
             let media_root = crate::storage::resolve_media_root(&app_for_blocking)?;
+            let settings = crate::settings::get_performance_settings(app_for_blocking.clone())?;
             let state = app_for_blocking.state::<DbState>();
 
             let emit = |processed: usize, total: usize, message: String| {
                 emit_progress(&app_for_blocking, processed, total, message);
             };
-            process_pending_media(&state.0, &media_root, &emit)
+            process_pending_media(&state.0, &media_root, &settings, &emit)
         },
     )
     .await
@@ -390,7 +393,7 @@ fn has_video_stream(path: &Path) -> Result<bool, String> {
 /// permanently doubling disk usage for every converted video. Mirrors the old
 /// Python `MediaProcessor.ensure_browser_playback`, minus the duplication.
 /// Returns `Ok(None)` when nothing needed to change (already playback-safe).
-fn ensure_playback_copy(asset: &PendingAsset) -> Result<Option<PathBuf>, String> {
+fn ensure_playback_copy(asset: &PendingAsset, settings: &PerformanceSettings) -> Result<Option<PathBuf>, String> {
     let input = PathBuf::from(&asset.original_path);
 
     // A side-by-side copy from before this function transcoded in place: it's
@@ -439,11 +442,16 @@ fn ensure_playback_copy(asset: &PendingAsset) -> Result<Option<PathBuf>, String>
     // format it recognizes ("Unable to choose an output format").
     let tmp_path = parent.join(format!("{stem}.snapvault-tmp.mp4"));
 
-    let output = Command::new("ffmpeg")
+    let mut command = Command::new("ffmpeg");
+    command
         .args(["-y", "-i"])
         .arg(&input)
         .args(["-map", "0:v:0", "-map", "0:a:0?"])
-        .args(["-c:v", "libx264", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p"])
+        .args(["-c:v", "libx264", "-preset", settings.transcode_preset.ffmpeg_preset(), "-crf", "23", "-pix_fmt", "yuv420p"]);
+    if let Some(thread_cap) = settings.ffmpeg_thread_cap() {
+        command.args(["-threads", &thread_cap.to_string()]);
+    }
+    let output = command
         .args(["-movflags", "+faststart"])
         .args(["-c:a", "aac", "-b:a", "128k"])
         .arg(&tmp_path)
@@ -530,7 +538,7 @@ fn needs_playback_transcode(path: &Path) -> Result<bool, String> {
 /// 360x360, and encodes as WebP. No `-ss` seek: it's a no-op for video (we
 /// already want frame 0) and actively breaks the image2 demuxer for still
 /// images, which drops the only frame and produces an empty file.
-fn generate_one_thumbnail(asset: &PendingAsset, output_path: &Path) -> Result<(), String> {
+fn generate_one_thumbnail(asset: &PendingAsset, output_path: &Path, settings: &PerformanceSettings) -> Result<(), String> {
     let input = PathBuf::from(&asset.original_path);
     if !input.is_file() {
         return Err(format!("source file missing: {}", input.display()));
@@ -538,6 +546,9 @@ fn generate_one_thumbnail(asset: &PendingAsset, output_path: &Path) -> Result<()
 
     let mut command = Command::new("ffmpeg");
     command.args(["-y", "-i"]).arg(&input);
+    if let Some(thread_cap) = settings.ffmpeg_thread_cap() {
+        command.args(["-threads", &thread_cap.to_string()]);
+    }
 
     let overlay = asset
         .overlay_path
@@ -644,7 +655,7 @@ mod tests {
             needs_thumbnail: true,
             needs_playback: false,
         };
-        let err = generate_one_thumbnail(&asset, Path::new("/tmp/out.webp")).unwrap_err();
+        let err = generate_one_thumbnail(&asset, Path::new("/tmp/out.webp"), &PerformanceSettings::default()).unwrap_err();
         assert!(err.contains("source file missing"));
     }
 
@@ -726,7 +737,7 @@ mod tests {
             needs_playback: true,
         };
 
-        let result = ensure_playback_copy(&asset).unwrap();
+        let result = ensure_playback_copy(&asset, &PerformanceSettings::default()).unwrap();
         let final_path = result.expect("mpeg4 input should need a playback-safe transcode");
 
         // Transcoded in place: same path, no second file, content replaced.
@@ -757,7 +768,7 @@ mod tests {
             needs_playback: true,
         };
 
-        let result = ensure_playback_copy(&asset).unwrap();
+        let result = ensure_playback_copy(&asset, &PerformanceSettings::default()).unwrap();
         let final_path = result.expect("should fold the side-by-side copy in");
 
         assert_eq!(final_path, original_path);
@@ -778,7 +789,7 @@ mod tests {
             needs_thumbnail: false,
             needs_playback: true,
         };
-        let err = ensure_playback_copy(&asset).unwrap_err();
+        let err = ensure_playback_copy(&asset, &PerformanceSettings::default()).unwrap_err();
         assert!(err.contains("source file missing"));
     }
 }

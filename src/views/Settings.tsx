@@ -17,6 +17,7 @@ import { useState } from "react";
 import StorageChoiceModal from "../components/StorageChoiceModal";
 import ThumbnailGenerator from "../components/ThumbnailGenerator";
 import { useLibraryStats } from "../hooks/useLibraryStats";
+import { usePerformanceSettings, type TranscodePreset } from "../hooks/usePerformanceSettings";
 import { useStorageInfo } from "../hooks/useStorageSettings";
 
 type VerifySummary = {
@@ -40,13 +41,36 @@ function formatBytes(bytes: number): string {
 
 export default function Settings() {
   return (
-    <div className="space-y-4">
-      <LibraryStatsPanel />
-      <StorageLocationPanel />
-      <ThumbnailGenerator />
-      <VerifyLibraryPanel />
-      <DangerZonePanel />
+    <div className="space-y-8">
+      <SettingsSection title="Library">
+        <LibraryStatsPanel />
+        <VerifyLibraryPanel />
+      </SettingsSection>
+
+      <SettingsSection title="Storage">
+        <StorageLocationPanel />
+      </SettingsSection>
+
+      <SettingsSection title="Performance">
+        <PerformanceSettingsPanel />
+        <ThumbnailGenerator />
+      </SettingsSection>
+
+      <SettingsSection title="Danger zone">
+        <DangerZonePanel />
+      </SettingsSection>
     </div>
+  );
+}
+
+function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h2 className="mb-3 px-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500 dark:text-slate-400">
+        {title}
+      </h2>
+      <div className="space-y-4">{children}</div>
+    </section>
   );
 }
 
@@ -202,6 +226,116 @@ function StorageLocationPanel() {
           }}
         />
       ) : null}
+    </Panel>
+  );
+}
+
+const PRESET_OPTIONS: { value: TranscodePreset; label: string; description: string }[] = [
+  {
+    value: "fastest",
+    label: "Fastest",
+    description: "Lowest CPU use and quickest processing - best for older or low-power hardware. Files are a bit larger; playback quality is unaffected.",
+  },
+  {
+    value: "balanced",
+    label: "Balanced",
+    description: "A middle ground between processing speed and file size.",
+  },
+  {
+    value: "quality",
+    label: "Best quality",
+    description: "Smallest files, most CPU-intensive to produce. Best left for modern hardware.",
+  },
+];
+
+function PerformanceSettingsPanel() {
+  const { settings, isLoading, error, update } = usePerformanceSettings();
+  const [isSaving, setIsSaving] = useState(false);
+
+  async function handlePresetChange(preset: TranscodePreset) {
+    if (!settings || preset === settings.transcode_preset) {
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await update({ ...settings, transcode_preset: preset });
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleToggleCpuLimit() {
+    if (!settings) {
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await update({ ...settings, limit_cpu_usage: !settings.limit_cpu_usage });
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <Panel
+      title="Media processing"
+      description="Controls how much CPU generating thumbnails and converting videos for playback uses. Lower settings process slower but put a lighter load on older or lower-powered hardware - the videos and photos you see are identical either way."
+    >
+      {error ? (
+        <p className="text-sm text-red-500">Failed to load performance settings: {error}</p>
+      ) : !settings ? (
+        <div className="flex items-center justify-center py-6 text-slate-400 dark:text-slate-500">
+          <LoaderCircle className="h-5 w-5 animate-spin" />
+        </div>
+      ) : (
+        <div className="space-y-5">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              Video conversion speed
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {PRESET_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => handlePresetChange(option.value)}
+                  disabled={isSaving || isLoading}
+                  className={[
+                    "rounded-[1rem] border px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
+                    settings.transcode_preset === option.value
+                      ? "border-sky-300/40 bg-sky-500/10 text-sky-700 dark:border-sky-300/30 dark:bg-sky-300/[0.14] dark:text-sky-200"
+                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10",
+                  ].join(" ")}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+              {PRESET_OPTIONS.find((option) => option.value === settings.transcode_preset)?.description}
+            </p>
+          </div>
+
+          <label className="flex items-start gap-3 rounded-[1.1rem] border border-slate-200/70 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.035]">
+            <input
+              type="checkbox"
+              checked={settings.limit_cpu_usage}
+              onChange={handleToggleCpuLimit}
+              disabled={isSaving}
+              className="mt-0.5 h-4 w-4 accent-sky-600"
+            />
+            <span>
+              <span className="block text-sm font-medium text-slate-800 dark:text-slate-200">
+                Limit CPU usage while processing
+              </span>
+              <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                Caps media processing to about half your CPU cores, so the rest of your machine stays responsive
+                during a large import or backlog run.
+              </span>
+            </span>
+          </label>
+        </div>
+      )}
     </Panel>
   );
 }

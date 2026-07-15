@@ -101,7 +101,7 @@ fn set_media_root_at(fixed_dir: &Path, chosen: Option<&Path>) -> Result<PathBuf,
     Ok(media_root)
 }
 
-fn fixed_app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn fixed_app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_data_dir()

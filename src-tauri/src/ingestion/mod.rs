@@ -228,7 +228,10 @@ pub async fn run_ingestion(
             // both would otherwise pull the same pending assets and race
             // writing the same `{id}.tmp.mp4` output paths.
             acquire_media_processing_slot(&app_for_blocking);
-            let media_summary = process_pending_media(&state.0, &media_root_for_blocking, &emit_media);
+            let performance_settings = crate::settings::get_performance_settings(app_for_blocking.clone());
+            let media_summary = performance_settings.and_then(|settings| {
+                process_pending_media(&state.0, &media_root_for_blocking, &settings, &emit_media)
+            });
             release_media_processing_slot(&app_for_blocking);
             let media_summary = media_summary?;
 
