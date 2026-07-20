@@ -19,6 +19,7 @@ import ThumbnailGenerator from "../components/ThumbnailGenerator";
 import { useLibraryStats } from "../hooks/useLibraryStats";
 import { usePerformanceSettings, type TranscodePreset } from "../hooks/usePerformanceSettings";
 import { useStorageInfo } from "../hooks/useStorageSettings";
+import { useViewerSettings } from "../hooks/useViewerSettings";
 
 type VerifySummary = {
   checked: number;
@@ -49,6 +50,10 @@ export default function Settings() {
 
       <SettingsSection title="Storage">
         <StorageLocationPanel />
+      </SettingsSection>
+
+      <SettingsSection title="Media viewer">
+        <ViewerSettingsPanel />
       </SettingsSection>
 
       <SettingsSection title="Performance">
@@ -247,6 +252,105 @@ const PRESET_OPTIONS: { value: TranscodePreset; label: string; description: stri
     description: "Smallest files, most CPU-intensive to produce. Best left for modern hardware.",
   },
 ];
+
+const AUTOPLAY_DELAY_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: "Off" },
+  { value: 300, label: "Short" },
+  { value: 600, label: "Medium" },
+  { value: 1000, label: "Long" },
+];
+
+function ViewerSettingsPanel() {
+  const { settings, error, update } = useViewerSettings();
+  const [isSaving, setIsSaving] = useState(false);
+
+  async function handleToggleScrollNavigation() {
+    if (!settings) {
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await update({ ...settings, vertical_scroll_navigation: !settings.vertical_scroll_navigation });
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleAutoplayDelayChange(delayMs: number) {
+    if (!settings || delayMs === settings.autoplay_delay_ms) {
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await update({ ...settings, autoplay_delay_ms: delayMs });
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <Panel
+      title="Media viewer"
+      description="Controls how you move between photos and videos in the fullscreen viewer."
+    >
+      {error ? (
+        <p className="text-sm text-red-500">Failed to load viewer settings: {error}</p>
+      ) : !settings ? (
+        <div className="flex items-center justify-center py-6 text-slate-400 dark:text-slate-500">
+          <LoaderCircle className="h-5 w-5 animate-spin" />
+        </div>
+      ) : (
+        <div className="space-y-5">
+          <label className="flex items-start gap-3 rounded-[1.1rem] border border-slate-200/70 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.035]">
+            <input
+              type="checkbox"
+              checked={settings.vertical_scroll_navigation}
+              onChange={handleToggleScrollNavigation}
+              disabled={isSaving}
+              className="mt-0.5 h-4 w-4 accent-sky-600"
+            />
+            <span>
+              <span className="block text-sm font-medium text-slate-800 dark:text-slate-200">
+                Scroll to browse media
+              </span>
+              <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                Scroll or swipe vertically in the viewer to move to the next or previous item, instead of only using
+                the left/right buttons. Arrow keys and the buttons still work either way.
+              </span>
+            </span>
+          </label>
+
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              Autoplay delay
+            </p>
+            <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+              How long to wait after opening a video or voice message before it starts playing on its own.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {AUTOPLAY_DELAY_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => handleAutoplayDelayChange(option.value)}
+                  disabled={isSaving}
+                  className={[
+                    "rounded-[1rem] border px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
+                    settings.autoplay_delay_ms === option.value
+                      ? "border-sky-300/40 bg-sky-500/10 text-sky-700 dark:border-sky-300/30 dark:bg-sky-300/[0.14] dark:text-sky-200"
+                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10",
+                  ].join(" ")}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
 
 function PerformanceSettingsPanel() {
   const { settings, isLoading, error, update } = usePerformanceSettings();

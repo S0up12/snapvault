@@ -24,3 +24,80 @@
 ::-webkit-scrollbar-button {
   display: none;
 }
+
+/* Lightbox media-slide transitions - the incoming item slides in from the
+   side the user navigated from, and the outgoing item keeps moving the same
+   direction off the opposite side, like a strip of film advancing rather
+   than a plain crossfade. Full 100% offsets (of each layer's own box, which
+   spans the whole viewer) so the motion actually reads as a swipe. */
+@keyframes lightbox-enter-from-bottom {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes lightbox-enter-from-top {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes lightbox-enter-from-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes lightbox-enter-from-left {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes lightbox-exit-to-top {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-100%);
+  }
+}
+
+@keyframes lightbox-exit-to-bottom {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes lightbox-exit-to-left {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes lightbox-exit-to-right {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}

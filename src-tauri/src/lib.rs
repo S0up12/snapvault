@@ -16,7 +16,7 @@ use ingestion::run_ingestion;
 use library::{list_memory_assets, list_memory_tags, set_asset_favorite, set_asset_tags};
 use maintenance::{get_library_stats, reset_library, verify_library};
 use profile::get_profile_snapshot;
-use settings::{get_performance_settings, set_performance_settings};
+use settings::{get_performance_settings, get_viewer_settings, set_performance_settings, set_viewer_settings};
 use storage::{get_storage_info, set_media_root};
 use tauri::Manager;
 use thumbnails::{generate_thumbnails, resume_pending_media_on_startup, MediaProcessingState};
@@ -89,7 +89,9 @@ pub fn run() {
             get_storage_info,
             set_media_root,
             get_performance_settings,
-            set_performance_settings
+            set_performance_settings,
+            get_viewer_settings,
+            set_viewer_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
