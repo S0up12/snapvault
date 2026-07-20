@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { AlertCircle, CheckCircle2, Circle, FolderOpen, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import Stat from "./Stat";
 import StorageChoiceModal from "./StorageChoiceModal";
 import type { StorageInfo } from "../hooks/useStorageSettings";
 
@@ -134,12 +135,10 @@ export default function ImportFlow() {
   }
 
   return (
-    <div className="rounded-[1.75rem] border border-slate-200/80 bg-white/80 p-8 shadow-[0_20px_48px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04]">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-sky-700/70 dark:text-sky-200/65">
-        Import
-      </p>
-      <p className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">Import a Snapchat export</p>
-      <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+    <div className="rounded-lg bg-surface p-6 ring-1 ring-divider">
+      <p className="text-[10px] uppercase tracking-[0.14em] text-accent">Import</p>
+      <p className="mt-2 text-[19px]">Import a Snapchat export</p>
+      <p className="mt-1 text-[13px] text-neutral-400">
         Select the .zip file(s) you downloaded from Snapchat's "My Data" export. If Snapchat split
         your export into multiple parts, select all of them at once.
       </p>
@@ -148,7 +147,7 @@ export default function ImportFlow() {
         type="button"
         onClick={handleSelectFile}
         disabled={status === "running"}
-        className="mt-4 inline-flex items-center gap-2 rounded-[1rem] border border-sky-300/30 bg-sky-500/10 px-4 py-2 text-sm font-medium text-sky-700 transition hover:border-sky-400/45 hover:bg-sky-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:text-sky-200"
+        className="btn btn-primary mt-4 disabled:cursor-not-allowed"
       >
         {status === "running" ? (
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -159,7 +158,7 @@ export default function ImportFlow() {
       </button>
 
       {status === "running" || status === "completed" || status === "error" ? (
-        <div className="mt-6 space-y-3">
+        <div className="mt-6 flex flex-col gap-2">
           {STEPS.map((step) => {
             const isDone = status !== "error" && (donePhases.has(step.key) || status === "completed");
             const isActive = !isDone && activePhase === step.key && status === "running";
@@ -169,36 +168,36 @@ export default function ImportFlow() {
               <div
                 key={step.key}
                 className={[
-                  "rounded-[1.25rem] border p-4 transition",
+                  "rounded-md p-3 transition",
                   isErrored
-                    ? "border-red-300/50 bg-red-500/5 dark:border-red-400/30 dark:bg-red-500/10"
+                    ? "bg-red-500/7"
                     : isActive
-                      ? "border-sky-300/50 bg-sky-500/5 dark:border-sky-400/30 dark:bg-sky-500/10"
+                      ? "bg-accent/12 shadow-[inset_2px_0_0_var(--color-accent)]"
                       : isDone
-                        ? "border-emerald-300/40 bg-emerald-500/5 dark:border-emerald-400/20 dark:bg-emerald-500/5"
-                        : "border-slate-200/70 bg-slate-50/50 dark:border-white/10 dark:bg-white/[0.02]",
+                        ? "bg-accent/7"
+                        : "bg-white/[0.02]",
                 ].join(" ")}
               >
                 <div className="flex items-center gap-3">
                   {isErrored ? (
-                    <AlertCircle className="h-5 w-5 shrink-0 text-red-500" />
+                    <AlertCircle className="h-5 w-5 shrink-0 text-red-400" />
                   ) : isDone ? (
-                    <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-accent-200" />
                   ) : isActive ? (
-                    <Loader2 className="h-5 w-5 shrink-0 animate-spin text-sky-500" />
+                    <Loader2 className="h-5 w-5 shrink-0 animate-spin text-accent" />
                   ) : (
-                    <Circle className="h-5 w-5 shrink-0 text-slate-300 dark:text-white/15" />
+                    <Circle className="h-5 w-5 shrink-0 text-white/15" />
                   )}
                   <p
                     className={[
-                      "text-sm font-medium",
+                      "text-[13.5px]",
                       isErrored
-                        ? "text-red-600 dark:text-red-300"
+                        ? "text-red-300"
                         : isDone
-                          ? "text-emerald-700 dark:text-emerald-300"
+                          ? "text-accent-200"
                           : isActive
-                            ? "text-sky-700 dark:text-sky-200"
-                            : "text-slate-400 dark:text-slate-500",
+                            ? "font-medium text-accent"
+                            : "text-neutral-500",
                     ].join(" ")}
                   >
                     {step.label}
@@ -206,21 +205,21 @@ export default function ImportFlow() {
                 </div>
 
                 {isActive ? (
-                  <div className="mt-3 pl-8">
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-sky-100 dark:bg-white/10">
+                  <div className="mt-2.5 pl-8">
+                    <div className="h-[5px] w-full overflow-hidden rounded-full bg-neutral-800">
                       <div
-                        className="h-full rounded-full bg-sky-500 transition-[width] duration-200"
+                        className="h-full rounded-full bg-accent shadow-[0_0_12px_1px_color-mix(in_srgb,var(--color-accent)_55%,transparent)] transition-[width] duration-200"
                         style={{ width: `${phasePercent}%` }}
                       />
                     </div>
-                    <p className="mt-1.5 truncate text-xs text-slate-500 dark:text-slate-400">
+                    <p className="mt-1.5 truncate text-[11px] text-neutral-400">
                       {phaseMessage}
                     </p>
                   </div>
                 ) : null}
 
                 {isErrored ? (
-                  <p className="mt-2 pl-8 text-xs text-red-500">{error?.message}</p>
+                  <p className="mt-2 pl-8 text-xs text-red-400">{error?.message}</p>
                 ) : null}
               </div>
             );
@@ -229,20 +228,20 @@ export default function ImportFlow() {
       ) : null}
 
       {status === "error" && error && !STEPS.some((step) => step.key === error.phase) ? (
-        <div className="mt-3 rounded-[1.25rem] border border-red-300/50 bg-red-500/5 p-4 dark:border-red-400/30 dark:bg-red-500/10">
+        <div className="mt-3 rounded-lg bg-red-500/8 p-4 ring-1 ring-red-400/25">
           <div className="flex items-center gap-2">
-            <AlertCircle className="h-5 w-5 text-red-500" />
-            <p className="text-sm font-semibold text-red-600 dark:text-red-300">Import failed</p>
+            <AlertCircle className="h-5 w-5 text-red-400" />
+            <p className="text-sm font-semibold text-red-300">Import failed</p>
           </div>
-          <p className="mt-1.5 text-xs text-red-500">{error.message}</p>
+          <p className="mt-1.5 text-xs text-red-400">{error.message}</p>
         </div>
       ) : null}
 
       {status === "completed" && summary ? (
-        <div className="mt-5 rounded-[1.25rem] border border-emerald-300/40 bg-emerald-500/5 p-4 dark:border-emerald-400/20 dark:bg-emerald-500/5">
+        <div className="mt-5 rounded-lg bg-accent/6 p-4 ring-1 ring-accent/25">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-            <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Import complete</p>
+            <CheckCircle2 className="h-5 w-5 text-accent" />
+            <p className="text-sm font-semibold text-accent-200">Import complete</p>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
             <Stat label="Files extracted" value={summary.extracted_entries} />
@@ -270,19 +269,6 @@ export default function ImportFlow() {
           }}
         />
       ) : null}
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-[0.9rem] border border-slate-200/70 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
-        {label}
-      </p>
-      <p className="mt-0.5 text-base font-semibold text-slate-900 dark:text-white">
-        {value.toLocaleString()}
-      </p>
     </div>
   );
 }

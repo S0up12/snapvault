@@ -111,7 +111,7 @@ export default function VirtualTimelineGrid({
 
   if (isInitialLoading) {
     return (
-      <div className="flex h-full flex-1 items-center justify-center text-slate-400 dark:text-slate-500">
+      <div className="flex h-full flex-1 items-center justify-center text-neutral-500">
         <LoaderCircle className="h-6 w-6 animate-spin" />
       </div>
     );
@@ -119,7 +119,7 @@ export default function VirtualTimelineGrid({
 
   if (assets.length === 0) {
     return (
-      <div className="flex h-full flex-1 flex-col items-center justify-center gap-3 text-slate-400 dark:text-slate-500">
+      <div className="flex h-full flex-1 flex-col items-center justify-center gap-3 text-neutral-500">
         <ImageIcon className="h-8 w-8" />
         <p className="text-sm">No memories yet. Import a Snapchat export and generate thumbnails first.</p>
       </div>
@@ -130,7 +130,7 @@ export default function VirtualTimelineGrid({
     <div className="min-h-0 flex-1">
       <div
         ref={handleScrollElementRef}
-        className="relative h-full min-h-0 overflow-auto overscroll-contain rounded-[1.65rem] border border-slate-200/80 bg-white p-3 shadow-[0_24px_60px_rgba(15,23,42,0.08)] [scrollbar-gutter:stable] dark:border-white/10 dark:bg-slate-950/55 dark:shadow-black/20 sm:p-4"
+        className="relative h-full min-h-0 overflow-auto overscroll-contain rounded-lg bg-surface p-3 ring-1 ring-divider [scrollbar-gutter:stable] sm:p-4"
       >
         <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative", width: "100%" }}>
           {rowVirtualizer.getVirtualItems().map((virtualRow) => {
@@ -148,9 +148,9 @@ export default function VirtualTimelineGrid({
               <div key={row.key} data-index={virtualRow.index} style={style}>
                 {row.type === "header" ? (
                   <div className="pb-[14px] pt-1">
-                    <div className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(247,250,252,0.94))] px-4 py-2.5 shadow-[0_10px_28px_rgba(15,23,42,0.08)] backdrop-blur dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(8,14,24,0.96),rgba(4,8,14,0.92))] dark:shadow-black/20">
-                      <p className="text-sm font-medium text-slate-950 dark:text-white">{row.label}</p>
-                      <span className="rounded-full border border-slate-200/80 bg-slate-50 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400">
+                    <div className="flex items-center justify-between rounded-md bg-bg/92 px-4 py-2.5 ring-1 ring-divider backdrop-blur">
+                      <p className="text-sm font-medium text-fg">{row.label}</p>
+                      <span className="rounded-full bg-white/[0.04] px-3 py-1 text-xs uppercase tracking-[0.18em] text-neutral-400 ring-1 ring-divider">
                         {row.count}
                       </span>
                     </div>
@@ -178,14 +178,14 @@ export default function VirtualTimelineGrid({
 
         {isFetchingNextPage ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-3 pb-3">
-            <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-4 py-2 text-xs uppercase tracking-[0.22em] text-slate-700 shadow-lg shadow-slate-900/5 backdrop-blur dark:border-white/10 dark:bg-slate-950/80 dark:text-slate-300 dark:shadow-black/20">
+            <div className="inline-flex items-center gap-2 rounded-full bg-bg/85 px-4 py-2 text-xs uppercase tracking-[0.22em] text-neutral-300 ring-1 ring-divider backdrop-blur">
               <LoaderCircle className="h-4 w-4 animate-spin" />
               Loading next page
             </div>
           </div>
         ) : !hasNextPage && total > 0 ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-3 pb-3">
-            <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-4 py-2 text-xs uppercase tracking-[0.22em] text-slate-500 shadow-lg shadow-slate-900/5 backdrop-blur dark:border-white/10 dark:bg-slate-950/80 dark:text-slate-500 dark:shadow-black/20">
+            <div className="inline-flex items-center gap-2 rounded-full bg-bg/85 px-4 py-2 text-xs uppercase tracking-[0.22em] text-neutral-500 ring-1 ring-divider backdrop-blur">
               End of timeline
             </div>
           </div>

@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { AlertCircle, CheckCircle2, ImageIcon, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import Stat from "./Stat";
+
 type ProgressEvent =
   | { status: "progress"; processed: number; total: number; percent: number; message: string }
   | { status: "completed"; summary: ThumbnailSummary }
@@ -65,12 +67,10 @@ export default function ThumbnailGenerator() {
   }
 
   return (
-    <div className="rounded-[1.75rem] border border-slate-200/80 bg-white/80 p-8 shadow-[0_20px_48px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04]">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-sky-700/70 dark:text-sky-200/65">
-        Thumbnails
-      </p>
-      <p className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">Reprocess media</p>
-      <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+    <div className="rounded-lg bg-surface p-6 ring-1 ring-divider">
+      <p className="text-[10px] uppercase tracking-[0.14em] text-accent">Thumbnails</p>
+      <p className="mt-2 text-lg font-medium">Reprocess media</p>
+      <p className="mt-1 text-sm text-neutral-300">
         New imports generate thumbnails and convert incompatible videos (e.g. HEVC) automatically.
         Use this to backfill libraries imported before that existed, or to retry any that failed.
       </p>
@@ -79,7 +79,7 @@ export default function ThumbnailGenerator() {
         type="button"
         onClick={handleGenerate}
         disabled={status === "running"}
-        className="mt-4 inline-flex items-center gap-2 rounded-[1rem] border border-sky-300/30 bg-sky-500/10 px-4 py-2 text-sm font-medium text-sky-700 transition hover:border-sky-400/45 hover:bg-sky-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:text-sky-200"
+        className="btn btn-primary mt-4 disabled:cursor-not-allowed"
       >
         {status === "running" ? (
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -91,31 +91,28 @@ export default function ThumbnailGenerator() {
 
       {status === "running" ? (
         <div className="mt-5">
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-sky-100 dark:bg-white/10">
-            <div
-              className="h-full rounded-full bg-sky-500 transition-[width] duration-200"
-              style={{ width: `${percent}%` }}
-            />
+          <div className="h-[5px] w-full overflow-hidden rounded-full bg-neutral-800">
+            <div className="h-full rounded-full bg-accent transition-[width] duration-200" style={{ width: `${percent}%` }} />
           </div>
-          <p className="mt-1.5 truncate text-xs text-slate-500 dark:text-slate-400">{message}</p>
+          <p className="mt-1.5 truncate text-xs text-neutral-400">{message}</p>
         </div>
       ) : null}
 
       {status === "error" && error ? (
-        <div className="mt-5 rounded-[1.25rem] border border-red-300/50 bg-red-500/5 p-4 dark:border-red-400/30 dark:bg-red-500/10">
+        <div className="mt-5 rounded-md bg-red-500/8 p-4 ring-1 ring-red-400/25">
           <div className="flex items-center gap-2">
-            <AlertCircle className="h-5 w-5 text-red-500" />
-            <p className="text-sm font-semibold text-red-600 dark:text-red-300">Thumbnail generation failed</p>
+            <AlertCircle className="h-5 w-5 text-red-400" />
+            <p className="text-sm font-semibold text-red-300">Thumbnail generation failed</p>
           </div>
-          <p className="mt-1.5 text-xs text-red-500">{error}</p>
+          <p className="mt-1.5 text-xs text-red-400">{error}</p>
         </div>
       ) : null}
 
       {status === "completed" && summary ? (
-        <div className="mt-5 rounded-[1.25rem] border border-emerald-300/40 bg-emerald-500/5 p-4 dark:border-emerald-400/20 dark:bg-emerald-500/5">
+        <div className="mt-5 rounded-md bg-accent/6 p-4 ring-1 ring-accent/25">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-            <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">
+            <CheckCircle2 className="h-5 w-5 text-accent" />
+            <p className="text-sm font-semibold text-accent-200">
               {summary.total === 0 ? "Nothing to process" : "Media processed"}
             </p>
           </div>
@@ -128,19 +125,6 @@ export default function ThumbnailGenerator() {
           </div>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-[0.9rem] border border-slate-200/70 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
-        {label}
-      </p>
-      <p className="mt-0.5 text-base font-semibold text-slate-900 dark:text-white">
-        {value.toLocaleString()}
-      </p>
     </div>
   );
 }

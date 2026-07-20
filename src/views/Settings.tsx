@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+import Stat from "../components/Stat";
 import StorageChoiceModal from "../components/StorageChoiceModal";
 import ThumbnailGenerator from "../components/ThumbnailGenerator";
 import { useLibraryStats } from "../hooks/useLibraryStats";
@@ -71,10 +72,8 @@ export default function Settings() {
 function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section>
-      <h2 className="mb-3 px-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500 dark:text-slate-400">
-        {title}
-      </h2>
-      <div className="space-y-4">{children}</div>
+      <h2 className="mb-3 px-1 text-[11px] uppercase tracking-[0.28em] text-neutral-500">{title}</h2>
+      <div className="flex flex-col gap-4">{children}</div>
     </section>
   );
 }
@@ -91,28 +90,15 @@ function Panel({
   headerAction?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-[1.75rem] border border-slate-200/80 bg-white/80 p-8 shadow-[0_20px_48px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04]">
+    <div className="rounded-lg bg-surface p-6 ring-1 ring-divider">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-sky-700/70 dark:text-sky-200/65">
-            {title}
-          </p>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{description}</p>
+          <p className="text-[10px] uppercase tracking-[0.14em] text-accent">{title}</p>
+          <p className="mt-1 text-sm text-neutral-300">{description}</p>
         </div>
         {headerAction}
       </div>
       <div className="mt-4">{children}</div>
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="rounded-[0.9rem] border border-slate-200/70 bg-white/60 px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</p>
-      <p className="mt-0.5 text-base font-semibold text-slate-900 dark:text-white">
-        {typeof value === "number" ? value.toLocaleString() : value}
-      </p>
     </div>
   );
 }
@@ -129,7 +115,7 @@ function LibraryStatsPanel() {
           type="button"
           onClick={refresh}
           disabled={isLoading}
-          className="inline-flex items-center gap-1.5 rounded-2xl border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200"
+          className="btn btn-secondary text-xs disabled:cursor-not-allowed"
         >
           <RefreshCcw className={isLoading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
           Refresh
@@ -137,9 +123,9 @@ function LibraryStatsPanel() {
       }
     >
       {error ? (
-        <p className="text-sm text-red-500">Failed to load library stats: {error}</p>
+        <p className="text-sm text-red-400">Failed to load library stats: {error}</p>
       ) : !stats ? (
-        <div className="flex items-center justify-center py-6 text-slate-400 dark:text-slate-500">
+        <div className="flex items-center justify-center py-6 text-neutral-500">
           <LoaderCircle className="h-5 w-5 animate-spin" />
         </div>
       ) : (
@@ -175,28 +161,24 @@ function StorageLocationPanel() {
       description="Your database (a few MB, metadata only) always stays in SnapVault's app-data folder. This only controls where your photos, videos, chat attachments, and thumbnails are stored."
     >
       {error ? (
-        <p className="text-sm text-red-500">Failed to load storage settings: {error}</p>
+        <p className="text-sm text-red-400">Failed to load storage settings: {error}</p>
       ) : !info ? (
-        <div className="flex items-center justify-center py-6 text-slate-400 dark:text-slate-500">
+        <div className="flex items-center justify-center py-6 text-neutral-500">
           <LoaderCircle className="h-5 w-5 animate-spin" />
         </div>
       ) : (
         <>
-          <div className="rounded-[1.1rem] border border-slate-200/70 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.035]">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+          <div className="rounded-md bg-white/[0.03] px-4 py-3 ring-1 ring-divider">
+            <p className="text-[11px] uppercase tracking-wide text-neutral-500">
               Media location {info.is_default ? "(default)" : "(custom)"}
             </p>
-            <p className="mt-1 truncate text-sm text-slate-800 dark:text-slate-200" title={info.media_root}>
+            <p className="mt-1 truncate text-sm text-neutral-200" title={info.media_root}>
               {info.media_root}
             </p>
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => revealItemInDir(info.media_root)}
-              className="inline-flex items-center gap-2 rounded-[1rem] border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
-            >
+            <button type="button" onClick={() => revealItemInDir(info.media_root)} className="btn btn-secondary">
               <FolderOpen className="h-4 w-4" />
               Open folder
             </button>
@@ -205,7 +187,7 @@ function StorageLocationPanel() {
               type="button"
               onClick={() => setShowChoiceModal(true)}
               disabled={hasAssets}
-              className="inline-flex items-center gap-2 rounded-[1rem] border border-sky-300/30 bg-sky-500/10 px-4 py-2 text-sm font-medium text-sky-700 transition hover:border-sky-400/45 hover:bg-sky-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:text-sky-200"
+              className="btn btn-primary disabled:cursor-not-allowed"
             >
               <FolderCog className="h-4 w-4" />
               Change location
@@ -213,7 +195,7 @@ function StorageLocationPanel() {
           </div>
 
           {hasAssets ? (
-            <p className="mt-3 text-xs text-slate-400 dark:text-slate-500">
+            <p className="mt-3 text-xs text-neutral-500">
               Reset the library in the Danger Zone below before changing the storage location.
             </p>
           ) : null}
@@ -294,26 +276,24 @@ function ViewerSettingsPanel() {
       description="Controls how you move between photos and videos in the fullscreen viewer."
     >
       {error ? (
-        <p className="text-sm text-red-500">Failed to load viewer settings: {error}</p>
+        <p className="text-sm text-red-400">Failed to load viewer settings: {error}</p>
       ) : !settings ? (
-        <div className="flex items-center justify-center py-6 text-slate-400 dark:text-slate-500">
+        <div className="flex items-center justify-center py-6 text-neutral-500">
           <LoaderCircle className="h-5 w-5 animate-spin" />
         </div>
       ) : (
-        <div className="space-y-5">
-          <label className="flex items-start gap-3 rounded-[1.1rem] border border-slate-200/70 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.035]">
+        <div className="flex flex-col gap-5">
+          <label className="flex items-start gap-3 rounded-md bg-white/[0.03] px-4 py-3 ring-1 ring-divider">
             <input
               type="checkbox"
               checked={settings.vertical_scroll_navigation}
               onChange={handleToggleScrollNavigation}
               disabled={isSaving}
-              className="mt-0.5 h-4 w-4 accent-sky-600"
+              className="mt-0.5 h-4 w-4 accent-accent"
             />
             <span>
-              <span className="block text-sm font-medium text-slate-800 dark:text-slate-200">
-                Scroll to browse media
-              </span>
-              <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+              <span className="block text-sm font-medium text-neutral-200">Scroll to browse media</span>
+              <span className="mt-0.5 block text-xs text-neutral-400">
                 Scroll or swipe vertically in the viewer to move to the next or previous item, instead of only using
                 the left/right buttons. Arrow keys and the buttons still work either way.
               </span>
@@ -321,10 +301,8 @@ function ViewerSettingsPanel() {
           </label>
 
           <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              Autoplay delay
-            </p>
-            <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+            <p className="text-xs uppercase tracking-wide text-neutral-500">Autoplay delay</p>
+            <p className="mt-1 text-xs text-neutral-500">
               How long to wait after opening a video or voice message before it starts playing on its own.
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
@@ -335,10 +313,8 @@ function ViewerSettingsPanel() {
                   onClick={() => handleAutoplayDelayChange(option.value)}
                   disabled={isSaving}
                   className={[
-                    "rounded-[1rem] border px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
-                    settings.autoplay_delay_ms === option.value
-                      ? "border-sky-300/40 bg-sky-500/10 text-sky-700 dark:border-sky-300/30 dark:bg-sky-300/[0.14] dark:text-sky-200"
-                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10",
+                    "btn disabled:cursor-not-allowed",
+                    settings.autoplay_delay_ms === option.value ? "btn-primary" : "btn-secondary",
                   ].join(" ")}
                 >
                   {option.label}
@@ -386,17 +362,15 @@ function PerformanceSettingsPanel() {
       description="Controls how much CPU generating thumbnails and converting videos for playback uses. Lower settings process slower but put a lighter load on older or lower-powered hardware - the videos and photos you see are identical either way."
     >
       {error ? (
-        <p className="text-sm text-red-500">Failed to load performance settings: {error}</p>
+        <p className="text-sm text-red-400">Failed to load performance settings: {error}</p>
       ) : !settings ? (
-        <div className="flex items-center justify-center py-6 text-slate-400 dark:text-slate-500">
+        <div className="flex items-center justify-center py-6 text-neutral-500">
           <LoaderCircle className="h-5 w-5 animate-spin" />
         </div>
       ) : (
-        <div className="space-y-5">
+        <div className="flex flex-col gap-5">
           <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              Video conversion speed
-            </p>
+            <p className="text-xs uppercase tracking-wide text-neutral-500">Video conversion speed</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {PRESET_OPTIONS.map((option) => (
                 <button
@@ -405,34 +379,30 @@ function PerformanceSettingsPanel() {
                   onClick={() => handlePresetChange(option.value)}
                   disabled={isSaving || isLoading}
                   className={[
-                    "rounded-[1rem] border px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
-                    settings.transcode_preset === option.value
-                      ? "border-sky-300/40 bg-sky-500/10 text-sky-700 dark:border-sky-300/30 dark:bg-sky-300/[0.14] dark:text-sky-200"
-                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10",
+                    "btn disabled:cursor-not-allowed",
+                    settings.transcode_preset === option.value ? "btn-primary" : "btn-secondary",
                   ].join(" ")}
                 >
                   {option.label}
                 </button>
               ))}
             </div>
-            <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+            <p className="mt-2 text-xs text-neutral-500">
               {PRESET_OPTIONS.find((option) => option.value === settings.transcode_preset)?.description}
             </p>
           </div>
 
-          <label className="flex items-start gap-3 rounded-[1.1rem] border border-slate-200/70 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.035]">
+          <label className="flex items-start gap-3 rounded-md bg-white/[0.03] px-4 py-3 ring-1 ring-divider">
             <input
               type="checkbox"
               checked={settings.limit_cpu_usage}
               onChange={handleToggleCpuLimit}
               disabled={isSaving}
-              className="mt-0.5 h-4 w-4 accent-sky-600"
+              className="mt-0.5 h-4 w-4 accent-accent"
             />
             <span>
-              <span className="block text-sm font-medium text-slate-800 dark:text-slate-200">
-                Limit CPU usage while processing
-              </span>
-              <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+              <span className="block text-sm font-medium text-neutral-200">Limit CPU usage while processing</span>
+              <span className="mt-0.5 block text-xs text-neutral-400">
                 Caps media processing to about half your CPU cores, so the rest of your machine stays responsive
                 during a large import or backlog run.
               </span>
@@ -466,42 +436,30 @@ function VerifyLibraryPanel() {
 
   return (
     <Panel title="Verify library" description="Checks that every asset's file (original, thumbnail, playback copy) still exists on disk.">
-      <button
-        type="button"
-        onClick={handleVerify}
-        disabled={status === "running"}
-        className="inline-flex items-center gap-2 rounded-[1rem] border border-sky-300/30 bg-sky-500/10 px-4 py-2 text-sm font-medium text-sky-700 transition hover:border-sky-400/45 hover:bg-sky-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:text-sky-200"
-      >
+      <button type="button" onClick={handleVerify} disabled={status === "running"} className="btn btn-primary disabled:cursor-not-allowed">
         {status === "running" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
         {status === "running" ? "Verifying..." : "Verify library"}
       </button>
 
       {status === "error" && error ? (
-        <div className="mt-4 rounded-[1.25rem] border border-red-300/50 bg-red-500/5 p-4 dark:border-red-400/30 dark:bg-red-500/10">
+        <div className="mt-4 rounded-md bg-red-500/8 p-4 ring-1 ring-red-400/25">
           <div className="flex items-center gap-2">
-            <AlertCircle className="h-5 w-5 text-red-500" />
-            <p className="text-sm font-semibold text-red-600 dark:text-red-300">Verify failed</p>
+            <AlertCircle className="h-5 w-5 text-red-400" />
+            <p className="text-sm font-semibold text-red-300">Verify failed</p>
           </div>
-          <p className="mt-1.5 text-xs text-red-500">{error}</p>
+          <p className="mt-1.5 text-xs text-red-400">{error}</p>
         </div>
       ) : null}
 
       {status === "done" && summary ? (
-        <div
-          className={[
-            "mt-4 rounded-[1.25rem] border p-4",
-            hasIssues
-              ? "border-amber-300/50 bg-amber-500/5 dark:border-amber-400/30 dark:bg-amber-500/10"
-              : "border-emerald-300/40 bg-emerald-500/5 dark:border-emerald-400/20 dark:bg-emerald-500/5",
-          ].join(" ")}
-        >
+        <div className={["mt-4 rounded-md p-4 ring-1", hasIssues ? "bg-amber-500/8 ring-amber-400/25" : "bg-emerald-500/6 ring-emerald-400/20"].join(" ")}>
           <div className="flex items-center gap-2">
             {hasIssues ? (
-              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              <AlertTriangle className="h-5 w-5 text-amber-400" />
             ) : (
-              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
             )}
-            <p className={hasIssues ? "text-sm font-semibold text-amber-700 dark:text-amber-300" : "text-sm font-semibold text-emerald-700 dark:text-emerald-300"}>
+            <p className={hasIssues ? "text-sm font-semibold text-amber-300" : "text-sm font-semibold text-emerald-300"}>
               {hasIssues ? "Some files are missing" : "Everything checks out"}
             </p>
           </div>
@@ -543,22 +501,15 @@ function DangerZonePanel() {
 
   return (
     <Panel title="Danger zone" description="Wipe the database and every extracted/generated file, so you can re-import from a clean slate.">
-      <button
-        type="button"
-        onClick={handleReset}
-        disabled={status === "running"}
-        className="inline-flex items-center gap-2 rounded-[1rem] border border-red-400/40 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-600 transition hover:border-red-400/60 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300"
-      >
+      <button type="button" onClick={handleReset} disabled={status === "running"} className="btn btn-danger disabled:cursor-not-allowed">
         {status === "running" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
         {status === "running" ? "Resetting..." : "Reset library & start over"}
       </button>
 
       {status === "done" ? (
-        <p className="mt-3 text-sm text-emerald-600 dark:text-emerald-300">
-          Library reset. Go to the Dashboard to import a fresh export.
-        </p>
+        <p className="mt-3 text-sm text-emerald-300">Library reset. Go to the Dashboard to import a fresh export.</p>
       ) : null}
-      {status === "error" && error ? <p className="mt-3 text-sm text-red-500">Reset failed: {error}</p> : null}
+      {status === "error" && error ? <p className="mt-3 text-sm text-red-400">Reset failed: {error}</p> : null}
     </Panel>
   );
 }

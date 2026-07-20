@@ -1,15 +1,15 @@
 import { useState } from "react";
+import { useOutletContext } from "react-router-dom";
 
 import Lightbox from "../components/Lightbox";
-import MemoriesToolbar from "../components/memories/MemoriesToolbar";
+import type { LayoutOutletContext } from "../components/Layout";
 import TagEditorModal from "../components/memories/TagEditorModal";
 import VirtualTimelineGrid from "../components/VirtualTimelineGrid";
-import { useMemories, useMemoryTags, type MemoryAsset, type MemoryFilter, type MemorySort } from "../hooks/useMemories";
+import { useMemories, type MemoryAsset } from "../hooks/useMemories";
 
 export default function Memories() {
-  const [sort, setSort] = useState<MemorySort>("desc");
-  const [filter, setFilter] = useState<MemoryFilter>("all");
-  const [tag, setTag] = useState<string | null>(null);
+  const { memoriesFilters } = useOutletContext<LayoutOutletContext>();
+  const { sort, filter, tag, availableTags, refreshTags } = memoriesFilters;
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [tagEditorAsset, setTagEditorAsset] = useState<MemoryAsset | null>(null);
 
@@ -24,26 +24,15 @@ export default function Memories() {
     toggleFavorite,
     updateTags,
   } = useMemories(sort, filter, tag);
-  const { tags: availableTags, refresh: refreshTags } = useMemoryTags();
 
   return (
-    <section className="flex h-full min-h-0 w-full flex-col gap-4 overflow-hidden">
-      <MemoriesToolbar
-        sort={sort}
-        filter={filter}
-        tag={tag}
-        availableTags={availableTags}
-        total={total}
-        isLoading={isLoading}
-        onSortChange={setSort}
-        onFilterChange={setFilter}
-        onTagChange={setTag}
-      />
+    <section className="flex h-full min-h-0 w-full flex-col gap-3 overflow-hidden">
+      <p className="px-1 text-xs uppercase tracking-[0.22em] text-neutral-500">
+        {isLoading ? "Loading..." : `${total.toLocaleString()} ${total === 1 ? "memory" : "memories"}`}
+      </p>
 
       {error ? (
-        <div className="rounded-[1.25rem] border border-rose-300/40 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/20 dark:bg-rose-400/10 dark:text-rose-100">
-          {error}
-        </div>
+        <div className="rounded-md bg-red-500/8 px-4 py-3 text-sm text-red-300 ring-1 ring-red-400/25">{error}</div>
       ) : (
         <VirtualTimelineGrid
           assets={assets}

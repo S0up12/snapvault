@@ -1,10 +1,13 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Clapperboard, LoaderCircle, MessageSquareMore, Play, Users } from "lucide-react";
+import { Clapperboard, LoaderCircle, Play, Search, Users } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 
 import Lightbox, { type LightboxAsset } from "../components/Lightbox";
+import type { LayoutOutletContext } from "../components/Layout";
 import {
+  avatarGradient,
   avatarInitials,
   senderTone,
   useChatMessages,
@@ -51,7 +54,7 @@ function Linkified({ text }: { text: string }) {
           event.preventDefault();
           void openUrl(url);
         }}
-        className="text-sky-700 underline decoration-sky-700/40 underline-offset-2 hover:decoration-sky-700 dark:text-sky-300 dark:decoration-sky-300/40 dark:hover:decoration-sky-300"
+        className="text-accent-300 underline decoration-accent-300/40 underline-offset-2 hover:decoration-accent-300"
       >
         {url}
       </a>,
@@ -67,9 +70,23 @@ function Linkified({ text }: { text: string }) {
 }
 
 export default function Chats() {
+  const { chatsFilters } = useOutletContext<LayoutOutletContext>();
   const { threads, isLoading, error } = useChatThreads();
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const selectedThread = threads.find((t) => t.id === selectedThreadId) ?? null;
+
+  const filteredThreads = useMemo(
+    () =>
+      threads
+        .filter((thread) => thread.display_name.toLowerCase().includes(query.trim().toLowerCase()))
+        .filter((thread) => {
+          if (chatsFilters.scope === "group") return thread.is_group;
+          if (chatsFilters.scope === "private") return !thread.is_group;
+          return true;
+        }),
+    [threads, query, chatsFilters.scope],
+  );
 
   useEffect(() => {
     if (!selectedThreadId && threads.length > 0) {
@@ -78,35 +95,45 @@ export default function Chats() {
   }, [threads, selectedThreadId]);
 
   return (
-    <section className="flex h-full min-h-0 w-full overflow-hidden rounded-[1.9rem] border border-slate-200/80 bg-white shadow-[0_28px_80px_rgba(15,23,42,0.1)] dark:border-white/10 dark:bg-white/[0.045] dark:shadow-black/25">
-      <div className="flex w-[30%] min-w-[220px] flex-col gap-2 overflow-y-auto border-r border-slate-200/70 p-3 dark:border-white/10">
-        {isLoading ? (
-          <div className="flex flex-1 items-center justify-center text-slate-400 dark:text-slate-500">
-            <LoaderCircle className="h-5 w-5 animate-spin" />
-          </div>
-        ) : error ? (
-          <div className="rounded-[1.1rem] border border-rose-300/40 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-400/20 dark:bg-rose-400/10 dark:text-rose-100">
-            {error}
-          </div>
-        ) : threads.length === 0 ? (
-          <p className="p-3 text-sm text-slate-400 dark:text-slate-500">No conversations found.</p>
-        ) : (
-          threads.map((thread) => (
-            <ConversationRow
-              key={thread.id}
-              thread={thread}
-              isSelected={thread.id === selectedThreadId}
-              onSelect={() => setSelectedThreadId(thread.id)}
-            />
-          ))
-        )}
+    <section className="flex h-full min-h-0 w-full overflow-hidden rounded-lg ring-1 ring-divider">
+      <div className="flex w-[320px] min-w-[220px] shrink-0 flex-col border-r border-divider p-3.5">
+        <div className="relative mb-2.5">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-500" />
+          <input
+            type="text"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search people…"
+            className="input h-9 pl-9 text-[13px]"
+          />
+        </div>
+        <div className="flex flex-col gap-0.5 overflow-y-auto">
+          {isLoading ? (
+            <div className="flex flex-1 items-center justify-center py-8 text-neutral-500">
+              <LoaderCircle className="h-5 w-5 animate-spin" />
+            </div>
+          ) : error ? (
+            <div className="rounded-md bg-red-500/8 px-3 py-2 text-xs text-red-300 ring-1 ring-red-400/25">{error}</div>
+          ) : filteredThreads.length === 0 ? (
+            <p className="p-3 text-sm text-neutral-500">No conversations found.</p>
+          ) : (
+            filteredThreads.map((thread) => (
+              <ConversationRow
+                key={thread.id}
+                thread={thread}
+                isSelected={thread.id === selectedThreadId}
+                onSelect={() => setSelectedThreadId(thread.id)}
+              />
+            ))
+          )}
+        </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col bg-[linear-gradient(180deg,rgba(248,250,252,0.92),rgba(241,245,249,0.95))] dark:bg-[linear-gradient(180deg,rgba(8,14,24,0.9),rgba(4,8,14,0.95))]">
+      <div className="flex min-h-0 flex-1 flex-col">
         {selectedThread ? (
           <MessagePane thread={selectedThread} />
         ) : (
-          <div className="flex flex-1 items-center justify-center text-sm text-slate-400 dark:text-slate-500">
+          <div className="flex flex-1 items-center justify-center text-sm text-neutral-500">
             Select a conversation.
           </div>
         )}
@@ -129,29 +156,30 @@ function ConversationRow({
       type="button"
       onClick={onSelect}
       className={[
-        "flex w-full items-center gap-3 rounded-[1.2rem] border px-3 py-3 text-left transition",
-        isSelected
-          ? "border-sky-300/20 bg-sky-400/[0.12] shadow-[0_18px_36px_rgba(8,47,73,0.12)] dark:text-white"
-          : "border-transparent hover:border-slate-200 hover:bg-slate-50/90 dark:hover:border-white/10 dark:hover:bg-white/[0.045]",
+        "flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left transition",
+        isSelected ? "bg-accent/12 shadow-[inset_2px_0_0_var(--color-accent)]" : "hover:bg-white/[0.03]",
       ].join(" ")}
     >
-      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.28),_rgba(14,165,233,0.14),_rgba(15,23,42,0.08))] text-sm font-semibold text-slate-900 dark:text-white">
+      <div
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold text-white"
+        style={{ background: avatarGradient(thread.id) }}
+      >
         {avatarInitials(thread.display_name)}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <p className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
+          <p className={["truncate text-sm", isSelected ? "text-fg" : "text-neutral-300"].join(" ")}>
             {thread.display_name}
           </p>
           {thread.latest_at ? (
-            <span className="shrink-0 text-[11px] text-slate-400 dark:text-slate-500">
+            <span className="shrink-0 text-[11px] text-neutral-500">
               {formatDayGroup(thread.latest_at).shortLabel}
             </span>
           ) : null}
         </div>
-        <div className="flex items-center gap-1.5">
-          {thread.is_group ? <Users className="h-3 w-3 shrink-0 text-slate-400" /> : null}
-          <p className="truncate text-xs text-slate-500 dark:text-slate-400">{thread.latest_preview}</p>
+        <div className="mt-0.5 flex items-center gap-1.5">
+          {thread.is_group ? <Users className="h-3 w-3 shrink-0 text-neutral-500" /> : null}
+          <p className="truncate text-xs text-neutral-500">{thread.latest_preview}</p>
         </div>
       </div>
     </button>
@@ -190,27 +218,30 @@ function MessagePane({ thread }: { thread: ChatThread }) {
 
   return (
     <>
-      <div className="flex items-center gap-3 border-b border-slate-200/70 px-5 py-4 dark:border-white/10">
-        <MessageSquareMore className="h-5 w-5 text-sky-600 dark:text-sky-300" />
+      <div className="flex items-center gap-3 border-b border-divider px-6 py-4">
+        <div
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold text-white"
+          style={{ background: avatarGradient(thread.id) }}
+        >
+          {avatarInitials(thread.display_name)}
+        </div>
         <div>
-          <p className="text-sm font-semibold text-slate-950 dark:text-white">{thread.display_name}</p>
-          <p className="text-xs text-slate-400 dark:text-slate-500">
+          <p className="text-[15px]">{thread.display_name}</p>
+          <p className="text-[11.5px] text-neutral-500">
             {thread.message_count.toLocaleString()} {thread.message_count === 1 ? "message" : "messages"}
           </p>
         </div>
       </div>
 
-      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+      <div ref={scrollRef} className="flex-1 space-y-4.5 overflow-y-auto px-6 py-5">
         {isLoading ? (
-          <div className="flex h-full items-center justify-center text-slate-400 dark:text-slate-500">
+          <div className="flex h-full items-center justify-center text-neutral-500">
             <LoaderCircle className="h-5 w-5 animate-spin" />
           </div>
         ) : error ? (
-          <div className="rounded-[1.1rem] border border-rose-300/40 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-400/20 dark:bg-rose-400/10 dark:text-rose-100">
-            {error}
-          </div>
+          <div className="rounded-md bg-red-500/8 px-3 py-2 text-xs text-red-300 ring-1 ring-red-400/25">{error}</div>
         ) : messages.length === 0 ? (
-          <p className="text-sm text-slate-400 dark:text-slate-500">No messages in this conversation.</p>
+          <p className="text-sm text-neutral-500">No messages in this conversation.</p>
         ) : (
           messages.map((message) => (
             <MessageBubble key={message.id} message={message} isGroup={thread.is_group} onOpenMedia={setOpenMediaId} />
@@ -250,14 +281,12 @@ function MessageBubble({
   return (
     <div className="flex justify-start">
       <div className="max-w-[min(46rem,94%)]">
-        <div className="flex items-center gap-3 px-1">
-          <p className={["text-[11px] font-semibold uppercase tracking-[0.22em]", tone.label].join(" ")}>
-            {message.sender_label}
-          </p>
+        <div className={["px-0.5 text-[10.5px] font-semibold uppercase tracking-[0.2em]", tone.label].join(" ")}>
+          {message.sender_label}
         </div>
-        <div className="group mt-1.5 inline-flex items-stretch gap-3">
+        <div className="group mt-1.5 inline-flex items-stretch gap-2.5">
           <div className={["w-[3px] shrink-0 rounded-full", tone.pole].join(" ")} />
-          <div className="min-w-0 flex-1 rounded-r-[1.35rem] rounded-bl-[0.45rem] border border-slate-200/80 bg-white/88 px-4 py-3 text-slate-900 shadow-sm transition duration-150 group-hover:border-slate-300 dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-100">
+          <div className="min-w-0 flex-1 rounded-[4px_12px_12px_12px] bg-surface px-4 py-2.75 text-[14px] ring-1 ring-divider">
             {hasMedia ? (
               <div className="flex flex-col gap-2">
                 {message.media.map((media) => (
@@ -273,7 +302,7 @@ function MessageBubble({
               <Linkified text={text} />
             )}
           </div>
-          <div className="inline-flex min-h-[2.75rem] items-center px-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400 opacity-0 transition duration-150 group-hover:opacity-100">
+          <div className="inline-flex min-h-11 items-center px-1 text-[11px] uppercase tracking-[0.18em] text-neutral-500 opacity-0 transition duration-150 group-hover:opacity-100">
             <span>{formatMessageTime(message.sent_at)}</span>
           </div>
         </div>
@@ -318,12 +347,12 @@ function ChatMediaAttachment({ media, onOpen }: { media: ChatMessageMedia; onOpe
       type="button"
       onClick={() => onOpen(media.id)}
       title="View"
-      className="group relative inline-grid max-h-64 max-w-[240px] cursor-zoom-in place-items-center overflow-hidden rounded-[0.9rem] bg-black/5 transition hover:brightness-95 dark:bg-black/20"
+      className="group relative inline-grid max-h-64 max-w-[240px] cursor-zoom-in place-items-center overflow-hidden rounded-md bg-black/20 transition hover:brightness-95"
     >
       {thumbnailUrl ? (
         <img src={thumbnailUrl} alt="" className="col-start-1 row-start-1 max-h-64 max-w-[240px] object-contain" />
       ) : (
-        <div className="col-start-1 row-start-1 flex h-40 w-40 items-center justify-center text-slate-400 dark:text-slate-600">
+        <div className="col-start-1 row-start-1 flex h-40 w-40 items-center justify-center text-neutral-600">
           <Clapperboard className="h-8 w-8" />
         </div>
       )}

@@ -32,18 +32,18 @@ export default memo(function TimelineTile({
 
   return (
     <div
-      className="group relative overflow-hidden rounded-[1.35rem] border border-slate-200/70 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 hover:border-sky-300/30 hover:shadow-[0_24px_60px_rgba(15,23,42,0.14)] dark:border-white/10 dark:bg-slate-950 dark:shadow-black/25"
+      className="group relative overflow-hidden rounded-md ring-1 ring-white/5 transition hover:ring-accent/40"
       style={{ width, height }}
     >
       <button type="button" onClick={() => onOpen(index)} className="block h-full w-full" aria-label={`Open ${asset.media_type}`}>
         {thumbnailUrl ? (
           <img src={thumbnailUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-slate-100 text-slate-400 dark:bg-white/[0.04] dark:text-slate-600">
+          <div className="flex h-full w-full items-center justify-center bg-white/[0.04] text-neutral-600">
             <MediaTypeIcon className="h-8 w-8" />
           </div>
         )}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent opacity-0 transition duration-200 group-hover:opacity-100" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-bg/70 via-bg/10 to-transparent opacity-0 transition duration-200 group-hover:opacity-100" />
       </button>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center justify-between px-3 pb-3 opacity-0 transition duration-150 group-hover:opacity-100">

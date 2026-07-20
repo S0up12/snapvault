@@ -24,17 +24,15 @@ export default function TitleBar() {
     <div
       data-tauri-drag-region
       onDoubleClick={() => void appWindow.toggleMaximize()}
-      className="flex h-9 shrink-0 select-none items-center border-b border-slate-200/70 bg-white/90 pl-4 dark:border-white/10 dark:bg-slate-950/90"
+      className="flex h-[38px] shrink-0 select-none items-center border-b border-divider"
     >
-      <p data-tauri-drag-region className="flex-1 text-xs font-medium uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
-        SnapVault
-      </p>
+      <p data-tauri-drag-region className="flex-1" />
 
-      <div className="flex h-full shrink-0">
+      <div className="flex h-full shrink-0 text-neutral-500">
         <button
           type="button"
           onClick={() => void appWindow.minimize()}
-          className="flex h-full w-11 items-center justify-center text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10"
+          className="flex h-full w-11 items-center justify-center transition hover:bg-white/5 hover:text-fg"
           aria-label="Minimize"
         >
           <Minus className="h-4 w-4" />
@@ -42,7 +40,7 @@ export default function TitleBar() {
         <button
           type="button"
           onClick={() => void appWindow.toggleMaximize()}
-          className="flex h-full w-11 items-center justify-center text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10"
+          className="flex h-full w-11 items-center justify-center transition hover:bg-white/5 hover:text-fg"
           aria-label={isMaximized ? "Restore" : "Maximize"}
         >
           {isMaximized ? <Copy className="h-3.5 w-3.5 -scale-x-100" /> : <Square className="h-3.5 w-3.5" />}
@@ -50,7 +48,7 @@ export default function TitleBar() {
         <button
           type="button"
           onClick={() => void appWindow.close()}
-          className="flex h-full w-11 items-center justify-center text-slate-600 transition hover:bg-red-500 hover:text-white dark:text-slate-300"
+          className="flex h-full w-11 items-center justify-center transition hover:bg-red-500 hover:text-white"
           aria-label="Close"
         >
           <X className="h-4 w-4" />

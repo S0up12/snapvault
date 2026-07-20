@@ -25,23 +25,19 @@ export default function Profile() {
 
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center text-slate-400 dark:text-slate-500">
+      <div className="flex h-full items-center justify-center text-neutral-500">
         <LoaderCircle className="h-6 w-6 animate-spin" />
       </div>
     );
   }
 
   if (error) {
-    return (
-      <div className="rounded-[1.25rem] border border-rose-300/40 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/20 dark:bg-rose-400/10 dark:text-rose-100">
-        {error}
-      </div>
-    );
+    return <div className="rounded-md bg-red-500/8 px-4 py-3 text-sm text-red-300 ring-1 ring-red-400/25">{error}</div>;
   }
 
   if (!profile) {
     return (
-      <div className="rounded-[1.75rem] border border-slate-200/80 bg-white/80 p-8 text-sm text-slate-500 shadow-[0_20px_48px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400">
+      <div className="rounded-lg bg-surface p-8 text-sm text-neutral-400 ring-1 ring-divider">
         No profile data yet. Import a Snapchat export from the Dashboard first.
       </div>
     );
@@ -51,51 +47,39 @@ export default function Profile() {
   const displayName = account.display_name || account.username || "Snapchat Profile";
 
   return (
-    <section className="mx-auto flex w-full max-w-[1600px] flex-col gap-6">
-      <div className="overflow-hidden rounded-[2rem] border border-slate-200/70 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),_transparent_40%),linear-gradient(135deg,_rgba(255,255,255,0.95),_rgba(238,246,255,0.94))] p-6 shadow-[0_28px_70px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.18),_transparent_42%),linear-gradient(135deg,_rgba(10,18,28,0.92),_rgba(4,9,15,0.98))]">
-        <div className="flex flex-wrap items-center gap-5">
-          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-[1.7rem] border border-slate-200/80 bg-white/85 text-2xl font-semibold text-slate-900 shadow-inner shadow-white/50 dark:border-white/10 dark:bg-white/[0.07] dark:text-white">
+    <section className="mx-auto flex w-full max-w-[1400px] flex-col gap-5">
+      <div className="relative overflow-hidden rounded-lg bg-surface p-6.5 ring-1 ring-divider">
+        <div className="pointer-events-none absolute -right-8 -top-16 h-56 w-80 rounded-full bg-[radial-gradient(circle,color-mix(in_srgb,var(--color-accent)_26%,transparent),transparent_68%)]" />
+        <div className="relative flex flex-wrap items-center gap-5">
+          <span className="flex h-19 w-19 shrink-0 items-center justify-center rounded-[18px] bg-gradient-to-br from-accent-500 to-accent-700 text-[26px] font-semibold text-white shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-accent)_40%,transparent)]">
             {avatarInitials(displayName)}
-          </div>
+          </span>
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-sky-700/70 dark:text-sky-200/65">
-              Imported Profile
-            </p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">
-              {displayName}
-            </h1>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-              {account.username ? (
-                <span className="rounded-full border border-slate-200/80 bg-white/70 px-3 py-1 text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
-                  @{account.username}
-                </span>
-              ) : null}
-              <span className="rounded-full border border-slate-200/80 bg-white/70 px-3 py-1 text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
-                Joined {formatDate(account.created_at)}
-              </span>
-              {account.country ? (
-                <span className="rounded-full border border-slate-200/80 bg-white/70 px-3 py-1 text-slate-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300">
-                  {account.country}
-                </span>
-              ) : null}
+            <p className="text-[10px] uppercase tracking-[0.14em] text-accent">Imported profile</p>
+            <h1 className="mt-1 text-[27px] tracking-[-0.02em]">{displayName}</h1>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {account.username ? <span className="tag tag-neutral">@{account.username}</span> : null}
+              <span className="tag tag-neutral">Joined {formatDate(account.created_at)}</span>
+              {account.country ? <span className="tag tag-neutral">{account.country}</span> : null}
+              <span className="tag tag-outline">Snapscore {formatNumber(ranking.snapscore)}</span>
             </div>
           </div>
         </div>
-
-        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatCard label="Friends" value={formatNumber(friends.friends_count)} Icon={Users} />
-          <StatCard label="Snapscore" value={formatNumber(ranking.snapscore)} Icon={Trophy} />
-          <StatCard label="Memories" value={formatNumber(profile.memory_count)} Icon={Archive} />
-          <StatCard label="Bitmoji Opens" value={formatNumber(bitmoji.app_open_count)} Icon={Smile} />
-        </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <div className="space-y-6">
-          <SettingsCard title="Account">
+      <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
+        <StatCard label="Friends" value={formatNumber(friends.friends_count)} Icon={Users} accent />
+        <StatCard label="Snapscore" value={formatNumber(ranking.snapscore)} Icon={Trophy} />
+        <StatCard label="Memories" value={formatNumber(profile.memory_count)} Icon={Archive} />
+        <StatCard label="Bitmoji opens" value={formatNumber(bitmoji.app_open_count)} Icon={Smile} />
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-2">
+        <div className="flex flex-col gap-5">
+          <DetailCard title="Account">
             <InfoList
               items={[
-                { label: "Display Name", value: account.display_name },
+                { label: "Display name", value: account.display_name },
                 { label: "Username", value: account.username },
                 { label: "Created", value: formatDate(account.created_at) },
                 { label: "Country", value: account.country },
@@ -103,97 +87,118 @@ export default function Profile() {
                 { label: "Registration IP", value: account.registration_ip },
               ]}
             />
-          </SettingsCard>
+          </DetailCard>
 
-          <SettingsCard title="Friends">
-            <div className="grid grid-cols-3 gap-3">
-              <StatCard label="Current" value={formatNumber(friends.friends_count)} Icon={Users} />
-              <StatCard label="Blocked" value={formatNumber(friends.blocked_count)} Icon={Users} />
-              <StatCard label="Deleted" value={formatNumber(friends.deleted_count)} Icon={Users} />
+          <DetailCard title="Friends">
+            <div className="grid grid-cols-3 gap-2.5">
+              <MiniStat label="Current" value={formatNumber(friends.friends_count)} />
+              <MiniStat label="Blocked" value={formatNumber(friends.blocked_count)} />
+              <MiniStat label="Deleted" value={formatNumber(friends.deleted_count)} />
             </div>
             {friends.top_friends.length > 0 ? (
-              <div className="mt-4 space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
-                  Friend Preview
-                </p>
+              <div className="mt-4 flex flex-col gap-1.5">
                 {friends.top_friends.map((friend) => (
                   <div
                     key={friend.Username}
-                    className="flex items-center justify-between rounded-[1.2rem] border border-slate-200/70 bg-slate-50/85 px-4 py-2.5 dark:border-white/10 dark:bg-white/[0.035]"
+                    className="flex items-center justify-between rounded-md bg-white/[0.04] px-3.5 py-2.25"
                   >
-                    <span className="text-sm text-slate-700 dark:text-slate-200">
+                    <span className="text-[13.5px] text-neutral-200">
                       {friend["Display Name"] || friend.Username}
                     </span>
-                    <span className="text-xs text-slate-400 dark:text-slate-500">@{friend.Username}</span>
+                    <span className="text-xs text-neutral-500">@{friend.Username}</span>
                   </div>
                 ))}
               </div>
             ) : null}
-          </SettingsCard>
+          </DetailCard>
         </div>
 
-        <div className="space-y-6">
-          <SettingsCard title="Engagement">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <StatCard label="App Opens" value={formatNumber(engagement.application_opens)} Icon={Smile} />
-              <StatCard label="Story Views" value={formatNumber(engagement.story_views)} Icon={Smile} />
-              <StatCard label="Snap Views" value={formatNumber(engagement.snap_views)} Icon={Smile} />
-              <StatCard label="Chats Sent" value={formatNumber(engagement.chats_sent)} Icon={Smile} />
-              <StatCard label="Chats Viewed" value={formatNumber(engagement.chats_viewed)} Icon={Smile} />
-              <StatCard label="Direct Snaps" value={formatNumber(engagement.direct_snaps_created)} Icon={Smile} />
+        <div className="flex flex-col gap-5">
+          <DetailCard title="Engagement">
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+              <EngagementStat label="App opens" value={formatNumber(engagement.application_opens)} />
+              <EngagementStat label="Story views" value={formatNumber(engagement.story_views)} />
+              <EngagementStat label="Snap views" value={formatNumber(engagement.snap_views)} />
+              <EngagementStat label="Chats sent" value={formatNumber(engagement.chats_sent)} />
+              <EngagementStat label="Chats viewed" value={formatNumber(engagement.chats_viewed)} />
+              <EngagementStat label="Direct snaps" value={formatNumber(engagement.direct_snaps_created)} />
             </div>
-          </SettingsCard>
+          </DetailCard>
 
-          <SettingsCard title="Bitmoji">
-            <InfoList
-              items={[
-                { label: "Avatar Gender", value: bitmoji.avatar_gender },
-                { label: "App Opens", value: formatNumber(bitmoji.app_open_count) },
-                { label: "Outfit Saves", value: formatNumber(bitmoji.outfit_save_count) },
-                { label: "Shares", value: formatNumber(bitmoji.share_count) },
-                { label: "Created", value: formatDate(bitmoji.account_created_at) },
-              ]}
-            />
-          </SettingsCard>
+          <DetailCard title="Bitmoji">
+            <div className="flex flex-col gap-px">
+              <BitmojiRow label="Avatar gender" value={bitmoji.avatar_gender ?? "—"} />
+              <BitmojiRow label="Outfit saves" value={formatNumber(bitmoji.outfit_save_count)} />
+              <BitmojiRow label="Shares" value={formatNumber(bitmoji.share_count)} />
+              <BitmojiRow label="Created" value={formatDate(bitmoji.account_created_at)} last />
+            </div>
+          </DetailCard>
         </div>
       </div>
     </section>
   );
 }
 
-function SettingsCard({ title, children }: { title: string; children: ReactNode }) {
+function DetailCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="rounded-[1.75rem] border border-slate-200/70 bg-white/85 p-5 shadow-[0_24px_50px_rgba(15,23,42,0.08)] backdrop-blur dark:border-white/10 dark:bg-white/[0.045] dark:shadow-black/20 md:p-6">
-      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">{title}</p>
-      <div className="mt-4">{children}</div>
+    <div className="rounded-lg bg-surface p-5.5 ring-1 ring-divider">
+      <p className="mb-3.5 text-[10px] uppercase tracking-[0.14em] text-neutral-500">{title}</p>
+      {children}
     </div>
   );
 }
 
-function StatCard({ label, value, Icon }: { label: string; value: string; Icon: LucideIcon }) {
+function StatCard({ label, value, Icon, accent }: { label: string; value: string; Icon: LucideIcon; accent?: boolean }) {
   return (
-    <div className="relative rounded-[1.5rem] border border-slate-200/70 bg-white/80 p-4 shadow-[0_18px_40px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-white/[0.04]">
-      <Icon className="absolute right-4 top-4 h-5 w-5 text-slate-500 dark:text-slate-300" />
-      <div className="pr-8">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">{label}</p>
-        <p className="mt-3 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">{value}</p>
-      </div>
+    <div className="relative rounded-md bg-surface p-4.5 ring-1 ring-divider">
+      <Icon className="absolute right-4 top-4 h-5 w-5 text-neutral-600" />
+      <p className={["text-[10px] tracking-[0.12em] uppercase", accent ? "text-accent" : "text-neutral-500"].join(" ")}>
+        {label}
+      </p>
+      <p className="mt-2 text-[28px] font-medium tracking-[-0.02em]">{value}</p>
     </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md bg-white/[0.04] px-2 py-3 text-center">
+      <div className="text-[22px] font-medium">{value}</div>
+      <div className="mt-1 text-[10px] uppercase tracking-wide text-neutral-500">{label}</div>
+    </div>
+  );
+}
+
+function EngagementStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md bg-white/[0.04] p-3.25">
+      <div className="text-[19px] font-medium">{value}</div>
+      <div className="mt-1 text-[10px] uppercase tracking-wide text-neutral-500">{label}</div>
+    </div>
+  );
+}
+
+function BitmojiRow({ label, value, last }: { label: string; value: string; last?: boolean }) {
+  return (
+    <>
+      <div className="flex justify-between px-0.5 py-2.25 text-[13.5px]">
+        <span className="text-neutral-400">{label}</span>
+        <span>{value}</span>
+      </div>
+      {last ? null : (
+        <div className="h-px bg-[linear-gradient(to_right,transparent,var(--color-divider)_24px,var(--color-divider)_calc(100%-24px),transparent)]" />
+      )}
+    </>
   );
 }
 
 function InfoList({ items }: { items: { label: string; value: string | null }[] }) {
   return (
-    <dl className="grid gap-2 sm:grid-cols-2">
+    <dl className="grid grid-cols-2 gap-2.5">
       {items.map((item) => (
-        <div
-          key={item.label}
-          className="rounded-[1.2rem] border border-slate-200/70 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.035]"
-        >
-          <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
-            {item.label}
-          </dt>
-          <dd className="mt-1 text-sm text-slate-800 dark:text-slate-200">{item.value || "—"}</dd>
+        <div key={item.label} className="rounded-md bg-white/[0.04] px-3.5 py-2.75">
+          <dt className="text-[10px] uppercase tracking-[0.08em] text-neutral-500">{item.label}</dt>
+          <dd className="mt-1 text-sm text-neutral-200">{item.value || "—"}</dd>
         </div>
       ))}
     </dl>

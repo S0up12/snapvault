@@ -229,10 +229,10 @@ export default function Lightbox<T extends LightboxAsset>({
                   }
                 : undefined
             }
-            className="col-start-1 row-start-1 block h-full w-full rounded-[1.5rem] object-contain"
+            className="col-start-1 row-start-1 block h-full w-full rounded-md object-contain"
           />
         ) : itemIsAudio ? (
-          <div className="col-start-1 row-start-1 flex h-full w-full min-h-[10rem] min-w-[16rem] flex-col items-center justify-center gap-4 rounded-[1.5rem] bg-white/[0.03] p-8">
+          <div className="col-start-1 row-start-1 flex h-full min-h-40 w-full min-w-64 flex-col items-center justify-center gap-4 rounded-md bg-white/[0.03] p-8">
             {live ? (
               <audio ref={audioRef} key={item.id} src={itemUrl} controls preload="metadata" className="w-full max-w-sm" />
             ) : null}
@@ -252,7 +252,7 @@ export default function Lightbox<T extends LightboxAsset>({
                   }
                 : undefined
             }
-            className="col-start-1 row-start-1 block h-full w-full rounded-[1.5rem] object-contain"
+            className="col-start-1 row-start-1 block h-full w-full rounded-md object-contain"
           />
         )}
         {itemOverlayUrl ? (
@@ -260,7 +260,7 @@ export default function Lightbox<T extends LightboxAsset>({
             src={itemOverlayUrl}
             alt=""
             aria-hidden="true"
-            className="pointer-events-none col-start-1 row-start-1 h-full w-full rounded-[1.5rem] object-fill"
+            className="pointer-events-none col-start-1 row-start-1 h-full w-full rounded-md object-fill"
           />
         ) : null}
       </>
@@ -270,28 +270,23 @@ export default function Lightbox<T extends LightboxAsset>({
   return (
     <div className="fixed inset-0 z-50 bg-black/95 p-3 sm:p-5" onClick={onClose}>
       <div
-        className="relative flex h-full w-full flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-[#060c14] shadow-2xl shadow-black/50"
+        className="relative flex h-full w-full flex-col overflow-hidden rounded-lg bg-bg ring-1 ring-white/10"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-white/10 px-4 py-4 sm:px-6">
+        <div className="flex items-center justify-between border-b border-divider px-4 py-4 sm:px-6">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">Viewer</p>
+            <p className="text-xs uppercase tracking-[0.25em] text-neutral-500">Viewer</p>
             <div className="mt-2 flex items-center gap-3">
-              <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-slate-100">
+              <span className="rounded-full bg-white/[0.05] px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-neutral-100 ring-1 ring-white/10">
                 {isVideo ? "Video" : isAudio ? "Voice message" : "Photo"}
               </span>
-              <p className="text-sm text-slate-300">{date.label}</p>
+              <p className="text-sm text-neutral-300">{date.label}</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             {onEditTags ? (
-              <button
-                type="button"
-                onClick={() => onEditTags(asset)}
-                className="rounded-2xl border border-white/10 bg-white/[0.05] px-3 py-2 text-slate-200 transition hover:bg-white/[0.1]"
-                title="Edit tags"
-              >
+              <button type="button" onClick={() => onEditTags(asset)} className="btn btn-secondary btn-icon" title="Edit tags">
                 <Tags className="h-4.5 w-4.5" />
               </button>
             ) : null}
@@ -299,27 +294,23 @@ export default function Lightbox<T extends LightboxAsset>({
               <button
                 type="button"
                 onClick={() => onToggleFavorite(asset)}
-                className="rounded-2xl border border-white/10 bg-white/[0.05] px-3 py-2 text-slate-200 transition hover:bg-white/[0.1]"
+                className="btn btn-secondary btn-icon"
                 title={asset.is_favorite ? "Unfavorite" : "Favorite"}
               >
                 <Star className={asset.is_favorite ? "h-4.5 w-4.5 fill-amber-300 text-amber-300" : "h-4.5 w-4.5"} />
               </button>
             ) : null}
-            <span className="hidden rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-xs uppercase tracking-[0.2em] text-slate-400 sm:inline-flex">
+            <span className="hidden rounded-full bg-white/[0.04] px-3 py-2 text-xs uppercase tracking-[0.2em] text-neutral-400 ring-1 ring-white/10 sm:inline-flex">
               {currentIndex + 1} / {assets.length}
             </span>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-2xl border border-white/10 bg-white/[0.05] p-3 text-slate-200 transition hover:bg-white/[0.1]"
-            >
+            <button type="button" onClick={onClose} className="btn btn-secondary btn-icon">
               <X className="h-5 w-5" />
             </button>
           </div>
         </div>
 
         <div
-          className="relative flex min-h-0 flex-1 items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(24,38,59,0.42),_rgba(4,6,10,0.96)_60%)] px-3 py-4 sm:px-6"
+          className="relative flex min-h-0 flex-1 items-center justify-center bg-[radial-gradient(circle_at_top,_color-mix(in_srgb,var(--color-accent)_10%,transparent),_rgba(4,6,10,0.96)_60%)] px-3 py-4 sm:px-6"
           onWheel={handleWheel}
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
@@ -350,7 +341,7 @@ export default function Lightbox<T extends LightboxAsset>({
                 style={{ animation: `${EXIT_ANIMATION[outgoing.direction.axis][outgoing.direction.sign]} ${SLIDE_ANIMATION_MS}ms ease-in forwards` }}
               >
                 <div
-                  className="relative inline-grid max-h-full max-w-full min-h-0 min-w-0 place-items-center overflow-hidden rounded-[1.5rem]"
+                  className="relative inline-grid max-h-full max-w-full min-h-0 min-w-0 place-items-center overflow-hidden rounded-md"
                   style={sizeStyle(outgoing.mediaBox)}
                 >
                   {renderMedia(outgoing.asset, false)}
@@ -364,7 +355,7 @@ export default function Lightbox<T extends LightboxAsset>({
               style={navDirection ? { animation: `${ENTER_ANIMATION[navDirection.axis][navDirection.sign]} ${SLIDE_ANIMATION_MS}ms ease-out` } : undefined}
             >
               <div
-                className="relative inline-grid max-h-full max-w-full min-h-0 min-w-0 place-items-center overflow-hidden rounded-[1.5rem]"
+                className="relative inline-grid max-h-full max-w-full min-h-0 min-w-0 place-items-center overflow-hidden rounded-md"
                 style={sizeStyle(mediaBox)}
               >
                 {renderMedia(asset, true)}

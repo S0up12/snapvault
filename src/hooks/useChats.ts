@@ -89,15 +89,15 @@ export function avatarInitials(name: string): string {
 }
 
 const GROUP_TONES = [
-  { label: "text-cyan-600 dark:text-cyan-300", pole: "bg-cyan-400" },
-  { label: "text-lime-600 dark:text-lime-300", pole: "bg-lime-400" },
-  { label: "text-fuchsia-600 dark:text-fuchsia-300", pole: "bg-fuchsia-400" },
-  { label: "text-amber-600 dark:text-amber-300", pole: "bg-amber-400" },
-  { label: "text-violet-600 dark:text-violet-300", pole: "bg-violet-400" },
-  { label: "text-emerald-600 dark:text-emerald-300", pole: "bg-emerald-400" },
+  { label: "text-cyan-300", pole: "bg-cyan-400" },
+  { label: "text-lime-300", pole: "bg-lime-400" },
+  { label: "text-fuchsia-300", pole: "bg-fuchsia-400" },
+  { label: "text-amber-300", pole: "bg-amber-400" },
+  { label: "text-violet-300", pole: "bg-violet-400" },
+  { label: "text-emerald-300", pole: "bg-emerald-400" },
 ];
-const PRIVATE_ME_TONE = { label: "text-rose-600 dark:text-rose-300", pole: "bg-rose-400" };
-const PRIVATE_OTHER_TONE = { label: "text-sky-600 dark:text-sky-300", pole: "bg-sky-400" };
+const PRIVATE_ME_TONE = { label: "text-rose-300", pole: "bg-rose-400" };
+const PRIVATE_OTHER_TONE = { label: "text-sky-300", pole: "bg-sky-400" };
 
 function hashSenderLabel(label: string): number {
   let hash = 0;
@@ -114,4 +114,27 @@ export function senderTone(message: ChatMessage, isGroup: boolean): { label: str
     return message.is_me ? PRIVATE_ME_TONE : PRIVATE_OTHER_TONE;
   }
   return GROUP_TONES[hashSenderLabel(message.sender_label) % GROUP_TONES.length];
+}
+
+const AVATAR_GRADIENTS = [
+  "linear-gradient(135deg,#565a86,#2b2741)",
+  "linear-gradient(135deg,#6b4a5c,#2b2741)",
+  "linear-gradient(135deg,#42624f,#2b2741)",
+  "linear-gradient(135deg,#7d5f3c,#2b2741)",
+  "linear-gradient(135deg,#3a5c6b,#2b2741)",
+  "linear-gradient(135deg,#8a6446,#2b2741)",
+];
+
+function hashString(value: string): number {
+  let hash = 0;
+  for (const char of value) {
+    hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+// A deterministic muted gradient per thread, so conversations stay visually
+// distinct in the list without reaching for saturated per-sender colors.
+export function avatarGradient(seed: string): string {
+  return AVATAR_GRADIENTS[hashString(seed) % AVATAR_GRADIENTS.length];
 }

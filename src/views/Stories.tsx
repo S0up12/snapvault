@@ -1,7 +1,3 @@
 export default function Stories() {
-  return (
-    <div className="rounded-[1.75rem] border border-slate-200/80 bg-white/80 p-8 text-sm text-slate-500 shadow-[0_20px_48px_rgba(15,23,42,0.08)] dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400">
-      Stories view coming soon.
-    </div>
-  );
+  return <div className="rounded-lg bg-surface p-8 text-sm text-neutral-400 ring-1 ring-divider">Stories view coming soon.</div>;
 }

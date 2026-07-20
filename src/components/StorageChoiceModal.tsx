@@ -55,51 +55,35 @@ export default function StorageChoiceModal({ defaultPath, allowCancel, onCancel,
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm"
-      onClick={allowCancel ? onCancel : undefined}
-    >
-      <div
-        className="w-full max-w-lg rounded-[1.8rem] border border-slate-200/80 bg-white/96 p-6 shadow-2xl shadow-slate-900/20 dark:border-white/10 dark:bg-slate-950/95"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <div className="dialog-backdrop z-[60]" onClick={allowCancel ? onCancel : undefined}>
+      <div className="dialog w-full max-w-lg" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-sky-700/70 dark:text-sky-200/65">
-              Storage Location
-            </p>
-            <h2 className="mt-1 text-lg font-semibold text-slate-950 dark:text-white">
-              Where should SnapVault store your data?
-            </h2>
-            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-accent">Storage Location</p>
+            <h2 className="dialog-title mt-1">Where should SnapVault store your data?</h2>
+            <p className="dialog-body mt-2">
               Your photos, videos, chat attachments, and generated thumbnails will be saved here. You
               can change this later in Settings, as long as your library is empty.
             </p>
           </div>
           {allowCancel ? (
-            <button
-              type="button"
-              onClick={onCancel}
-              className="shrink-0 rounded-xl border border-slate-200 bg-white p-2 text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
-            >
+            <button type="button" onClick={onCancel} className="btn btn-secondary btn-icon shrink-0">
               <X className="h-4 w-4" />
             </button>
           ) : null}
         </div>
 
-        <div className="mt-5 space-y-3">
+        <div className="mt-2 flex flex-col gap-3">
           <button
             type="button"
             onClick={chooseDefault}
             disabled={isSaving}
-            className="flex w-full items-center gap-3 rounded-[1.25rem] border border-slate-200/80 bg-slate-50/85 p-4 text-left transition hover:border-sky-300/40 hover:bg-sky-50/60 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.035] dark:hover:bg-white/[0.06]"
+            className="flex w-full items-center gap-3 rounded-md bg-white/[0.03] p-4 text-left ring-1 ring-divider transition hover:bg-accent/8 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <HardDrive className="h-5 w-5 shrink-0 text-sky-600 dark:text-sky-300" />
+            <HardDrive className="h-5 w-5 shrink-0 text-accent" />
             <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium text-slate-900 dark:text-white">
-                Use the default location
-              </span>
-              <span className="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400" title={defaultPath}>
+              <span className="block text-sm font-medium text-fg">Use the default location</span>
+              <span className="mt-0.5 block truncate text-xs text-neutral-400" title={defaultPath}>
                 {defaultPath}
               </span>
             </span>
@@ -109,33 +93,33 @@ export default function StorageChoiceModal({ defaultPath, allowCancel, onCancel,
             type="button"
             onClick={chooseFolder}
             disabled={isSaving}
-            className="flex w-full items-center gap-3 rounded-[1.25rem] border border-slate-200/80 bg-slate-50/85 p-4 text-left transition hover:border-sky-300/40 hover:bg-sky-50/60 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.035] dark:hover:bg-white/[0.06]"
+            className="flex w-full items-center gap-3 rounded-md bg-white/[0.03] p-4 text-left ring-1 ring-divider transition hover:bg-accent/8 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <FolderCog className="h-5 w-5 shrink-0 text-sky-600 dark:text-sky-300" />
+            <FolderCog className="h-5 w-5 shrink-0 text-accent" />
             <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium text-slate-900 dark:text-white">Choose a folder</span>
-              <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+              <span className="block text-sm font-medium text-fg">Choose a folder</span>
+              <span className="mt-0.5 block text-xs text-neutral-400">
                 Pick any folder on your computer, e.g. an external or secondary drive
               </span>
             </span>
-            <FolderOpen className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" />
+            <FolderOpen className="h-4 w-4 shrink-0 text-neutral-500" />
           </button>
         </div>
 
         {isSaving ? (
-          <div className="mt-4 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+          <div className="flex items-center gap-2 text-sm text-neutral-400">
             <LoaderCircle className="h-4 w-4 animate-spin" />
             Saving...
           </div>
         ) : null}
 
         {error ? (
-          <div className="mt-4 rounded-[1.25rem] border border-red-300/50 bg-red-500/5 p-4 dark:border-red-400/30 dark:bg-red-500/10">
+          <div className="rounded-md bg-red-500/8 p-4 ring-1 ring-red-400/25">
             <div className="flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-red-500" />
-              <p className="text-sm font-semibold text-red-600 dark:text-red-300">Couldn't set storage location</p>
+              <AlertCircle className="h-5 w-5 text-red-400" />
+              <p className="text-sm font-semibold text-red-300">Couldn't set storage location</p>
             </div>
-            <p className="mt-1.5 text-xs text-red-500">{error}</p>
+            <p className="mt-1.5 text-xs text-red-400">{error}</p>
           </div>
         ) : null}
       </div>
