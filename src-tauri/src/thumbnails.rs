@@ -3,6 +3,9 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::Value;
@@ -20,6 +23,16 @@ const WEBP_QUALITY: &str = "72";
 const PLAYBACK_SAFE_VIDEO_CODECS: &[&str] = &["h264"];
 const PLAYBACK_SAFE_AUDIO_CODECS: &[&str] = &["aac", "mp3"];
 const PLAYBACK_SAFE_EXTENSIONS: &[&str] = &["mp4", "m4v"];
+
+/// Spawns `program` without flashing a console window. ffmpeg/ffprobe are
+/// console-subsystem binaries, so a plain `Command::new` pops a visible
+/// window on Windows every time this GUI app spawns one.
+fn no_window_command(program: &str) -> Command {
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    cmd
+}
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -360,7 +373,7 @@ fn load_pending_assets(conn: &Connection) -> Result<Vec<PendingAsset>, String> {
 /// chat attachments are audio-only .mp4 containers that `process_pending_media`
 /// uses this to detect and reclassify (see its doc comment).
 fn has_video_stream(path: &Path) -> Result<bool, String> {
-    let output = Command::new("ffprobe")
+    let output = no_window_command("ffprobe")
         .args([
             "-v", "error",
             "-select_streams", "v",
@@ -442,7 +455,7 @@ fn ensure_playback_copy(asset: &PendingAsset, settings: &PerformanceSettings) ->
     // format it recognizes ("Unable to choose an output format").
     let tmp_path = parent.join(format!("{stem}.snapvault-tmp.mp4"));
 
-    let mut command = Command::new("ffmpeg");
+    let mut command = no_window_command("ffmpeg");
     command
         .args(["-y", "-i"])
         .arg(&input)
@@ -498,7 +511,7 @@ fn needs_playback_transcode(path: &Path) -> Result<bool, String> {
         return Ok(true);
     }
 
-    let output = Command::new("ffprobe")
+    let output = no_window_command("ffprobe")
         .args(["-v", "error", "-show_entries", "stream=codec_name,codec_type", "-of", "json"])
         .arg(path)
         .output()
@@ -544,7 +557,7 @@ fn generate_one_thumbnail(asset: &PendingAsset, output_path: &Path, settings: &P
         return Err(format!("source file missing: {}", input.display()));
     }
 
-    let mut command = Command::new("ffmpeg");
+    let mut command = no_window_command("ffmpeg");
     command.args(["-y", "-i"]).arg(&input);
     if let Some(thread_cap) = settings.ffmpeg_thread_cap() {
         command.args(["-threads", &thread_cap.to_string()]);
