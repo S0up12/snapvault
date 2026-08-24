@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 export type ViewerSettings = {
   vertical_scroll_navigation: boolean;
   autoplay_delay_ms: number;
+  /** Fixed tile columns for the Memories grid; 0 means responsive/auto. */
+  grid_columns: number;
 };
 
 export function useViewerSettings() {

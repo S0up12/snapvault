@@ -34,7 +34,8 @@ pub struct MemoriesPage {
 ///
 /// `sort` is `"asc"` or `"desc"` (defaults to `"desc"`); `filter` is one of
 /// `"all"`, `"photo"`, `"video"`, `"favorite"` (defaults to `"all"`); `tag`
-/// optionally restricts to assets carrying that exact tag.
+/// optionally restricts to assets carrying that exact tag; `year` optionally
+/// restricts to that calendar year.
 #[tauri::command]
 pub fn list_memory_assets(
     state: tauri::State<DbState>,
@@ -43,20 +44,119 @@ pub fn list_memory_assets(
     sort: String,
     filter: String,
     tag: Option<String>,
+    year: Option<i32>,
 ) -> Result<MemoriesPage, String> {
     let conn = state.0.lock().map_err(|err| err.to_string())?;
     let offset = offset.max(0);
     let limit = limit.clamp(1, MAX_PAGE_SIZE);
     let tag = tag.filter(|t| !t.trim().is_empty());
 
-    let total = count_matching(&conn, &filter, tag.as_deref())?;
-    let assets = load_page(&conn, offset, limit, &sort, &filter, tag.as_deref())?;
+    let total = count_matching(&conn, &filter, tag.as_deref(), year)?;
+    let assets = load_page(&conn, offset, limit, &sort, &filter, tag.as_deref(), year)?;
 
     Ok(MemoriesPage {
         assets,
         total,
         offset,
     })
+}
+
+/// Distinct years (ascending) that have at least one matching memory, for
+/// the Memories timeline scrubber's tick labels and the date filter's option
+/// list. `year_filter` mirrors whatever date filter is currently active, so
+/// the scrubber correctly collapses to a single tick when one is set.
+#[tauri::command]
+pub fn list_memory_years(
+    state: tauri::State<DbState>,
+    filter: String,
+    tag: Option<String>,
+    year_filter: Option<i32>,
+) -> Result<Vec<i32>, String> {
+    let conn = state.0.lock().map_err(|err| err.to_string())?;
+    let tag = tag.filter(|t| !t.trim().is_empty());
+    list_years(&conn, &filter, tag.as_deref(), year_filter)
+}
+
+/// Row offset of the first matching asset at or after `year` (in the given
+/// sort order), so the frontend's timeline scrubber can jump the grid
+/// straight to that point via `list_memory_assets`. `year_filter` must match
+/// whatever date filter `list_memory_assets` is currently called with, or
+/// the computed offset won't line up with that filtered result set.
+#[tauri::command]
+pub fn memory_year_offset(
+    state: tauri::State<DbState>,
+    year: i32,
+    sort: String,
+    filter: String,
+    tag: Option<String>,
+    year_filter: Option<i32>,
+) -> Result<i64, String> {
+    let conn = state.0.lock().map_err(|err| err.to_string())?;
+    let tag = tag.filter(|t| !t.trim().is_empty());
+    year_offset(&conn, year, &sort, &filter, tag.as_deref(), year_filter)
+}
+
+fn list_years(conn: &Connection, filter: &str, tag: Option<&str>, year_filter: Option<i32>) -> Result<Vec<i32>, String> {
+    let sql = format!(
+        "SELECT DISTINCT CAST(substr(taken_at, 1, 4) AS INTEGER) AS y
+         FROM assets
+         WHERE source_type = 'memory' AND taken_at IS NOT NULL {media} {tag_clause} {year_clause}
+         ORDER BY y ASC",
+        media = media_filter_clause(filter),
+        tag_clause = if tag.is_some() { TAG_FILTER_CLAUSE } else { "" },
+        year_clause = if year_filter.is_some() { YEAR_FILTER_CLAUSE } else { "" },
+    );
+    let year_str = year_filter.map(|y| format!("{y:04}"));
+    let mut stmt = conn.prepare(&sql).map_err(|err| err.to_string())?;
+    let mut params: Vec<(&str, &dyn ToSql)> = Vec::new();
+    if let Some(tag) = tag.as_ref() {
+        params.push((":tag", tag));
+    }
+    if let Some(year_str) = &year_str {
+        params.push((":year", year_str));
+    }
+    let years = stmt
+        .query_map(&params[..], |row| row.get::<_, i32>(0))
+        .map_err(|err| err.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| err.to_string())?;
+    Ok(years)
+}
+
+fn year_offset(
+    conn: &Connection,
+    year: i32,
+    sort: &str,
+    filter: &str,
+    tag: Option<&str>,
+    year_filter: Option<i32>,
+) -> Result<i64, String> {
+    // DESC lists newest-first, so everything "before" year Y's items is
+    // anything from Y+1 onward; ASC lists oldest-first, so it's anything
+    // strictly before Y's start.
+    let (comparison, bound) = if sort == "asc" {
+        ("<", format!("{year:04}-01-01T00:00:00.000Z"))
+    } else {
+        (">=", format!("{:04}-01-01T00:00:00.000Z", year + 1))
+    };
+    let sql = format!(
+        "SELECT COUNT(*) FROM assets
+         WHERE source_type = 'memory' AND taken_at IS NOT NULL {media} {tag_clause} {year_clause}
+         AND taken_at {comparison} :bound",
+        media = media_filter_clause(filter),
+        tag_clause = if tag.is_some() { TAG_FILTER_CLAUSE } else { "" },
+        year_clause = if year_filter.is_some() { YEAR_FILTER_CLAUSE } else { "" },
+    );
+    let year_str = year_filter.map(|y| format!("{y:04}"));
+    let mut params: Vec<(&str, &dyn ToSql)> = Vec::new();
+    if let Some(tag) = tag.as_ref() {
+        params.push((":tag", tag));
+    }
+    if let Some(year_str) = &year_str {
+        params.push((":year", year_str));
+    }
+    params.push((":bound", &bound));
+    conn.query_row(&sql, &params[..], |row| row.get(0)).map_err(|err| err.to_string())
 }
 
 /// Distinct tags across every memory asset, for the filter dropdown and the
@@ -130,20 +230,25 @@ fn media_filter_clause(filter: &str) -> &'static str {
     }
 }
 
-const TAG_FILTER_CLAUSE: &str = "AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?1)";
+const TAG_FILTER_CLAUSE: &str = "AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value = :tag)";
+const YEAR_FILTER_CLAUSE: &str = "AND substr(taken_at, 1, 4) = :year";
 
-fn count_matching(conn: &Connection, filter: &str, tag: Option<&str>) -> Result<i64, String> {
+fn count_matching(conn: &Connection, filter: &str, tag: Option<&str>, year: Option<i32>) -> Result<i64, String> {
     let sql = format!(
-        "SELECT COUNT(*) FROM assets WHERE source_type = 'memory' {} {}",
+        "SELECT COUNT(*) FROM assets WHERE source_type = 'memory' {} {} {}",
         media_filter_clause(filter),
         if tag.is_some() { TAG_FILTER_CLAUSE } else { "" },
+        if year.is_some() { YEAR_FILTER_CLAUSE } else { "" },
     );
-    let result = if let Some(tag) = tag {
-        conn.query_row(&sql, [tag], |row| row.get(0))
-    } else {
-        conn.query_row(&sql, [], |row| row.get(0))
-    };
-    result.map_err(|err| err.to_string())
+    let year_str = year.map(|y| format!("{y:04}"));
+    let mut params: Vec<(&str, &dyn ToSql)> = Vec::new();
+    if let Some(tag) = tag.as_ref() {
+        params.push((":tag", tag));
+    }
+    if let Some(year_str) = &year_str {
+        params.push((":year", year_str));
+    }
+    conn.query_row(&sql, &params[..], |row| row.get(0)).map_err(|err| err.to_string())
 }
 
 fn load_page(
@@ -153,33 +258,36 @@ fn load_page(
     sort: &str,
     filter: &str,
     tag: Option<&str>,
+    year: Option<i32>,
 ) -> Result<Vec<MemoryAsset>, String> {
     let order = if sort == "asc" { "ASC" } else { "DESC" };
-    let tag_clause = if tag.is_some() { TAG_FILTER_CLAUSE } else { "" };
     let sql = format!(
         "SELECT id, media_type, original_path, overlay_path, thumbnail_path, playback_path, taken_at, is_favorite, tags
          FROM assets
-         WHERE source_type = 'memory' {media} {tag_clause}
+         WHERE source_type = 'memory' {media} {tag_clause} {year_clause}
          ORDER BY taken_at {order}, id {order}
-         LIMIT ?{limit_pos} OFFSET ?{offset_pos}",
+         LIMIT :limit OFFSET :offset",
         media = media_filter_clause(filter),
-        tag_clause = tag_clause,
+        tag_clause = if tag.is_some() { TAG_FILTER_CLAUSE } else { "" },
+        year_clause = if year.is_some() { YEAR_FILTER_CLAUSE } else { "" },
         order = order,
-        limit_pos = if tag.is_some() { 2 } else { 1 },
-        offset_pos = if tag.is_some() { 3 } else { 2 },
     );
 
     let mut stmt = conn.prepare(&sql).map_err(|err| err.to_string())?;
 
-    let mut params: Vec<&dyn ToSql> = Vec::new();
-    if let Some(tag) = &tag {
-        params.push(tag);
+    let year_str = year.map(|y| format!("{y:04}"));
+    let mut params: Vec<(&str, &dyn ToSql)> = Vec::new();
+    if let Some(tag) = tag.as_ref() {
+        params.push((":tag", tag));
     }
-    params.push(&limit);
-    params.push(&offset);
+    if let Some(year_str) = &year_str {
+        params.push((":year", year_str));
+    }
+    params.push((":limit", &limit));
+    params.push((":offset", &offset));
 
     let rows = stmt
-        .query_map(rusqlite::params_from_iter(params), |row| {
+        .query_map(&params[..], |row| {
             let tags_json: String = row.get(8)?;
             Ok(MemoryAsset {
                 id: row.get(0)?,
@@ -223,10 +331,10 @@ mod tests {
         seed(&conn, "c", "2020-01-02T00:00:00.000Z", "memory");
         seed(&conn, "chat-asset", "2020-01-04T00:00:00.000Z", "chat");
 
-        let page1 = load_page(&conn, 0, 2, "desc", "all", None).unwrap();
+        let page1 = load_page(&conn, 0, 2, "desc", "all", None, None).unwrap();
         assert_eq!(page1.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["b", "c"]);
 
-        let page2 = load_page(&conn, 2, 2, "desc", "all", None).unwrap();
+        let page2 = load_page(&conn, 2, 2, "desc", "all", None, None).unwrap();
         assert_eq!(page2.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["a"]);
     }
 
@@ -237,7 +345,7 @@ mod tests {
         seed(&conn, "a", "2020-01-01T00:00:00.000Z", "memory");
         seed(&conn, "b", "2020-01-03T00:00:00.000Z", "memory");
 
-        let page = load_page(&conn, 0, 10, "asc", "all", None).unwrap();
+        let page = load_page(&conn, 0, 10, "asc", "all", None, None).unwrap();
         assert_eq!(page.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["a", "b"]);
     }
 
@@ -258,14 +366,28 @@ mod tests {
         )
         .unwrap();
 
-        let photos = load_page(&conn, 0, 10, "desc", "photo", None).unwrap();
+        let photos = load_page(&conn, 0, 10, "desc", "photo", None, None).unwrap();
         assert_eq!(photos.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["img"]);
 
-        let favorites = load_page(&conn, 0, 10, "desc", "favorite", None).unwrap();
+        let favorites = load_page(&conn, 0, 10, "desc", "favorite", None, None).unwrap();
         assert_eq!(favorites.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["vid"]);
 
-        assert_eq!(count_matching(&conn, "video", None).unwrap(), 1);
-        assert_eq!(count_matching(&conn, "all", None).unwrap(), 2);
+        assert_eq!(count_matching(&conn, "video", None, None).unwrap(), 1);
+        assert_eq!(count_matching(&conn, "all", None, None).unwrap(), 2);
+    }
+
+    #[test]
+    fn filters_by_year() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        seed(&conn, "a", "2019-06-01T00:00:00.000Z", "memory");
+        seed(&conn, "b", "2020-06-01T00:00:00.000Z", "memory");
+        seed(&conn, "c", "2020-12-01T00:00:00.000Z", "memory");
+
+        let year_2020 = load_page(&conn, 0, 10, "desc", "all", None, Some(2020)).unwrap();
+        assert_eq!(year_2020.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["c", "b"]);
+        assert_eq!(count_matching(&conn, "all", None, Some(2020)).unwrap(), 2);
+        assert_eq!(count_matching(&conn, "all", None, Some(2019)).unwrap(), 1);
     }
 
     #[test]
@@ -285,9 +407,9 @@ mod tests {
         )
         .unwrap();
 
-        let trip_only = load_page(&conn, 0, 10, "desc", "all", Some("trip")).unwrap();
+        let trip_only = load_page(&conn, 0, 10, "desc", "all", Some("trip"), None).unwrap();
         assert_eq!(trip_only.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec!["a"]);
-        assert_eq!(count_matching(&conn, "all", Some("friends")).unwrap(), 2);
+        assert_eq!(count_matching(&conn, "all", Some("friends"), None).unwrap(), 2);
     }
 
     #[test]
@@ -298,13 +420,64 @@ mod tests {
 
         let mut seen = BTreeSet::new();
         let mut cleaned = Vec::new();
-        for tag in vec![" trip ".to_string(), "trip".to_string(), "".to_string(), "friends".to_string()] {
+        for tag in [" trip ".to_string(), "trip".to_string(), "".to_string(), "friends".to_string()] {
             let tag = tag.trim().to_string();
             if !tag.is_empty() && seen.insert(tag.clone()) {
                 cleaned.push(tag);
             }
         }
         assert_eq!(cleaned, vec!["trip".to_string(), "friends".to_string()]);
+    }
+
+    #[test]
+    fn list_memory_years_returns_distinct_years_ascending_and_ignores_other_sources() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        seed(&conn, "a", "2021-06-01T00:00:00.000Z", "memory");
+        seed(&conn, "b", "2019-01-01T00:00:00.000Z", "memory");
+        seed(&conn, "c", "2021-12-01T00:00:00.000Z", "memory");
+        seed(&conn, "chat-asset", "2024-01-01T00:00:00.000Z", "chat");
+
+        let years = list_years(&conn, "all", None, None).unwrap();
+        assert_eq!(years, vec![2019, 2021]);
+    }
+
+    #[test]
+    fn list_years_collapses_to_the_active_year_filter() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        seed(&conn, "a", "2021-06-01T00:00:00.000Z", "memory");
+        seed(&conn, "b", "2019-01-01T00:00:00.000Z", "memory");
+
+        let years = list_years(&conn, "all", None, Some(2019)).unwrap();
+        assert_eq!(years, vec![2019]);
+    }
+
+    #[test]
+    fn memory_year_offset_counts_rows_that_sort_before_the_target_year() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        seed(&conn, "a", "2019-06-01T00:00:00.000Z", "memory");
+        seed(&conn, "b", "2020-06-01T00:00:00.000Z", "memory");
+        seed(&conn, "c", "2021-06-01T00:00:00.000Z", "memory");
+
+        // DESC (newest first): the 2021 item comes before 2020's.
+        assert_eq!(year_offset(&conn, 2020, "desc", "all", None, None).unwrap(), 1);
+        // ASC (oldest first): the 2019 item comes before 2020's.
+        assert_eq!(year_offset(&conn, 2020, "asc", "all", None, None).unwrap(), 1);
+    }
+
+    #[test]
+    fn memory_year_offset_respects_the_active_year_filter() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        seed(&conn, "a", "2020-06-01T00:00:00.000Z", "memory");
+        seed(&conn, "b", "2020-09-01T00:00:00.000Z", "memory");
+        seed(&conn, "c", "2021-06-01T00:00:00.000Z", "memory");
+
+        // Filtered to 2020 only, both 2020 rows sort before/at their own
+        // year's target, and the (excluded) 2021 row shouldn't count.
+        assert_eq!(year_offset(&conn, 2020, "desc", "all", None, Some(2020)).unwrap(), 0);
     }
 
     #[test]

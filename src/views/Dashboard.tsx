@@ -33,7 +33,7 @@ function StatTile({ label, value, accent }: { label: string; value: string; acce
 export default function Dashboard() {
   const { stats } = useLibraryStats();
   const { profile } = useProfile();
-  const { assets: recent } = useMemories("desc", "all", null);
+  const { assets: recent } = useMemories("desc", "all", null, null);
 
   return (
     <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-6">

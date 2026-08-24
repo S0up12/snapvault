@@ -144,7 +144,7 @@ pub(super) fn parse_chats_blocking(
             }
 
             processed += 1;
-            if processed % emit_step == 0 || processed == total_messages {
+            if processed.is_multiple_of(emit_step) || processed == total_messages {
                 emit(
                     processed,
                     total_messages,

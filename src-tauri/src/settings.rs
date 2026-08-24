@@ -12,9 +12,11 @@ const SETTINGS_FILE: &str = "performance_settings.json";
 /// low-end hardware needs (playback quality is unaffected either way).
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum TranscodePreset {
     Fastest,
     Balanced,
+    #[default]
     Quality,
 }
 
@@ -28,15 +30,9 @@ impl TranscodePreset {
     }
 }
 
-impl Default for TranscodePreset {
-    fn default() -> Self {
-        // The hardcoded preset this replaces - existing installs see no
-        // behavior change until they opt into something faster.
-        Self::Quality
-    }
-}
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct PerformanceSettings {
     #[serde(default)]
     pub transcode_preset: TranscodePreset,
@@ -48,14 +44,6 @@ pub struct PerformanceSettings {
     pub limit_cpu_usage: bool,
 }
 
-impl Default for PerformanceSettings {
-    fn default() -> Self {
-        Self {
-            transcode_preset: TranscodePreset::default(),
-            limit_cpu_usage: false,
-        }
-    }
-}
 
 impl PerformanceSettings {
     /// `None` means unrestricted (ffmpeg's own default: use every core).
@@ -109,11 +97,16 @@ pub struct ViewerSettings {
     /// concern - this just persists whatever number it's given.
     #[serde(default)]
     pub autoplay_delay_ms: u32,
+    /// Fixed tile columns for the Memories grid; 0 means responsive/auto
+    /// (fits as many columns as the window width allows - the original,
+    /// and still default, behavior).
+    #[serde(default)]
+    pub grid_columns: u32,
 }
 
 impl Default for ViewerSettings {
     fn default() -> Self {
-        Self { vertical_scroll_navigation: true, autoplay_delay_ms: 0 }
+        Self { vertical_scroll_navigation: true, autoplay_delay_ms: 0, grid_columns: 0 }
     }
 }
 
@@ -171,5 +164,6 @@ mod tests {
         let settings: ViewerSettings = serde_json::from_str("{}").unwrap();
         assert!(settings.vertical_scroll_navigation);
         assert_eq!(settings.autoplay_delay_ms, 0);
+        assert_eq!(settings.grid_columns, 0);
     }
 }

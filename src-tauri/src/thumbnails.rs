@@ -544,9 +544,9 @@ fn needs_playback_transcode(path: &Path) -> Result<bool, String> {
     Ok(false)
 }
 
-/// Grabs frame 0 (videos) or the source image itself - ffmpeg treats a still
-/// image input as a single-frame video stream, so one code path covers both
-/// - composites the caption/drawing overlay if present (mirrors the old
+/// Grabs frame 0 (videos) or the source image itself (ffmpeg treats a still
+/// image input as a single-frame video stream, so one code path covers both),
+/// composites the caption/drawing overlay if present (mirrors the old
 /// Python `MediaProcessor`'s PIL `alpha_composite` step), scales to fit
 /// 360x360, and encodes as WebP. No `-ss` seek: it's a no-op for video (we
 /// already want frame 0) and actively breaks the image2 demuxer for still

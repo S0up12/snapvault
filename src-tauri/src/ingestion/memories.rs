@@ -145,7 +145,7 @@ pub(super) fn parse_memories_blocking(
             position += 1;
 
             processed_files += 1;
-            if processed_files % emit_step == 0 || processed_files == total_files {
+            if processed_files.is_multiple_of(emit_step) || processed_files == total_files {
                 emit(
                     processed_files,
                     total_files,

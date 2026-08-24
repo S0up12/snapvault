@@ -437,7 +437,7 @@ fn extract_archives_blocking(
             }
 
             processed += 1;
-            if processed % emit_step == 0 || processed == total_entries {
+            if processed.is_multiple_of(emit_step) || processed == total_entries {
                 emit(
                     processed,
                     total_entries,

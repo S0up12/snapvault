@@ -24,20 +24,27 @@ type MemoriesPage = {
 
 const PAGE_SIZE = 120;
 
-export function useMemories(sort: MemorySort, filter: MemoryFilter, tag: string | null) {
+export function useMemories(sort: MemorySort, filter: MemoryFilter, tag: string | null, year: number | null) {
   const [assets, setAssets] = useState<MemoryAsset[]>([]);
+  const [baseOffset, setBaseOffset] = useState(0);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isFetchingNextPage, setIsFetchingNextPage] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped on every successful jumpToYear, so the grid knows to scroll back
+  // to its own top even though the assets array itself just got replaced.
+  const [jumpToken, setJumpToken] = useState(0);
 
   const loadPage = useCallback(
-    async (offset: number) => {
-      const page = await invoke<MemoriesPage>("list_memory_assets", { offset, limit: PAGE_SIZE, sort, filter, tag });
+    async (offset: number, replace = false) => {
+      const page = await invoke<MemoriesPage>("list_memory_assets", { offset, limit: PAGE_SIZE, sort, filter, tag, year });
       setTotal(page.total);
-      setAssets((current) => (offset === 0 ? page.assets : [...current, ...page.assets]));
+      setAssets((current) => (replace || offset === 0 ? page.assets : [...current, ...page.assets]));
+      if (replace || offset === 0) {
+        setBaseOffset(offset);
+      }
     },
-    [sort, filter, tag],
+    [sort, filter, tag, year],
   );
 
   useEffect(() => {
@@ -48,7 +55,7 @@ export function useMemories(sort: MemorySort, filter: MemoryFilter, tag: string 
       .finally(() => setIsLoading(false));
   }, [loadPage]);
 
-  const hasNextPage = assets.length < total;
+  const hasNextPage = baseOffset + assets.length < total;
 
   const fetchNextPage = useCallback(async () => {
     if (isFetchingNextPage || !hasNextPage) {
@@ -56,13 +63,39 @@ export function useMemories(sort: MemorySort, filter: MemoryFilter, tag: string 
     }
     setIsFetchingNextPage(true);
     try {
-      await loadPage(assets.length);
+      await loadPage(baseOffset + assets.length);
     } catch (err) {
       setError(String(err));
     } finally {
       setIsFetchingNextPage(false);
     }
-  }, [assets.length, hasNextPage, isFetchingNextPage, loadPage]);
+  }, [assets.length, baseOffset, hasNextPage, isFetchingNextPage, loadPage]);
+
+  // Jumps the grid straight to a given year via the timeline scrubber -
+  // resets pagination to start there instead of appending, so browsing from
+  // that point on works exactly like the initial load did.
+  const jumpToYear = useCallback(
+    async (targetYear: number) => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const offset = await invoke<number>("memory_year_offset", {
+          year: targetYear,
+          sort,
+          filter,
+          tag,
+          yearFilter: year,
+        });
+        await loadPage(offset, true);
+        setJumpToken((token) => token + 1);
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [sort, filter, tag, year, loadPage],
+  );
 
   const toggleFavorite = useCallback(async (asset: MemoryAsset) => {
     const nextFavorite = !asset.is_favorite;
@@ -94,7 +127,19 @@ export function useMemories(sort: MemorySort, filter: MemoryFilter, tag: string 
     }
   }, []);
 
-  return { assets, total, isLoading, isFetchingNextPage, hasNextPage, error, fetchNextPage, toggleFavorite, updateTags };
+  return {
+    assets,
+    total,
+    isLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    error,
+    fetchNextPage,
+    jumpToYear,
+    jumpToken,
+    toggleFavorite,
+    updateTags,
+  };
 }
 
 export function useMemoryTags() {
@@ -109,6 +154,38 @@ export function useMemoryTags() {
   }, [refresh]);
 
   return { tags, refresh };
+}
+
+// Distinct years (ascending) that have at least one matching memory - for
+// the Date filter's option list and the timeline scrubber's tick labels.
+// Recomputed whenever the active filter, tag, or year changes; collapses to
+// a single year once the date filter itself narrows to one.
+export function useMemoryYears(filter: MemoryFilter, tag: string | null, year: number | null) {
+  const [years, setYears] = useState<number[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<number[]>("list_memory_years", { filter, tag, yearFilter: year })
+      .then((result) => {
+        if (!cancelled) {
+          setYears(result);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [filter, tag, year]);
+
+  return years;
+}
+
+export function yearFromTakenAt(takenAt: string | null): number | null {
+  if (!takenAt) {
+    return null;
+  }
+  const year = Number.parseInt(takenAt.slice(0, 4), 10);
+  return Number.isNaN(year) ? null : year;
 }
 
 // Groups memories by calendar day, mirroring Snapchat's own Memories grouping.

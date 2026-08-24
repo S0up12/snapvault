@@ -78,6 +78,9 @@ $RECYCLE.BIN/
 .directory
 .Trash-*
 
+# --- Claude Code local config ---
+.claude/
+
 # --- Editor / IDE ---
 .vscode/*
 !.vscode/extensions.json

@@ -112,10 +112,13 @@ function MemoriesFilterPanel({
   sort,
   filter,
   tag,
+  year,
   setSort,
   setFilter,
   setTag,
+  setYear,
   availableTags,
+  availableYears,
 }: LayoutOutletContext["memoriesFilters"]) {
   return (
     <div className="flex flex-col gap-3">
@@ -138,6 +141,24 @@ function MemoriesFilterPanel({
               {option.label}
             </option>
           ))}
+        </select>
+      </div>
+
+      <div>
+        <p className="mb-1.5 text-[10px] uppercase tracking-wide text-neutral-500">Date</p>
+        <select
+          value={year ?? ""}
+          onChange={(event) => setYear(event.target.value ? Number(event.target.value) : null)}
+          className="input"
+        >
+          <option value="">All time</option>
+          {[...availableYears]
+            .sort((a, b) => b - a)
+            .map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
         </select>
       </div>
 

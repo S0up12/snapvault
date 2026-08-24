@@ -46,6 +46,10 @@ export default memo(function TimelineTile({
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-bg/70 via-bg/10 to-transparent opacity-0 transition duration-200 group-hover:opacity-100" />
       </button>
 
+      {asset.is_favorite ? (
+        <Star className="pointer-events-none absolute right-2.5 top-2.5 h-4 w-4 fill-amber-300 text-amber-300 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]" />
+      ) : null}
+
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center justify-between px-3 pb-3 opacity-0 transition duration-150 group-hover:opacity-100">
         <button
           type="button"

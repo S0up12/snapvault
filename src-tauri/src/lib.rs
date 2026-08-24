@@ -13,7 +13,9 @@ use std::sync::Mutex;
 use chats::{list_chat_messages, list_chat_threads};
 use db::DbState;
 use ingestion::run_ingestion;
-use library::{list_memory_assets, list_memory_tags, set_asset_favorite, set_asset_tags};
+use library::{
+    list_memory_assets, list_memory_tags, list_memory_years, memory_year_offset, set_asset_favorite, set_asset_tags,
+};
 use maintenance::{get_library_stats, reset_library, verify_library};
 use profile::get_profile_snapshot;
 use settings::{get_performance_settings, get_viewer_settings, set_performance_settings, set_viewer_settings};
@@ -54,7 +56,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let conn = db::init(&app.handle())?;
+            let conn = db::init(app.handle())?;
             app.manage(DbState(Mutex::new(conn)));
 
             // Widen the (in-memory, never-persisted) asset-protocol scope to
@@ -62,8 +64,8 @@ pub fn run() {
             // tauri.conf.json scope only covers the default AppData case, and
             // this call is what lets a previously-chosen custom root's
             // thumbnails/playback/imports load via convertFileSrc.
-            let media_root = storage::resolve_media_root(&app.handle())?;
-            storage::widen_asset_protocol_scope(&app.handle(), &media_root)?;
+            let media_root = storage::resolve_media_root(app.handle())?;
+            storage::widen_asset_protocol_scope(app.handle(), &media_root)?;
 
             app.manage(MediaProcessingState::default());
             resume_pending_media_on_startup(app.handle().clone());
@@ -78,6 +80,8 @@ pub fn run() {
             generate_thumbnails,
             list_memory_assets,
             list_memory_tags,
+            list_memory_years,
+            memory_year_offset,
             set_asset_favorite,
             set_asset_tags,
             list_chat_threads,

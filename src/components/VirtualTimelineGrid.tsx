@@ -1,12 +1,12 @@
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import { ImageIcon, LoaderCircle } from "lucide-react";
+import { CalendarDays, ImageIcon, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { formatDayGroup, type MemoryAsset } from "../hooks/useMemories";
+import { formatDayGroup, yearFromTakenAt, type MemoryAsset } from "../hooks/useMemories";
 import TimelineTile from "./memories/TimelineTile";
 
 type GridRow =
-  | { type: "header"; key: string; label: string; shortLabel: string; count: number }
+  | { type: "header"; key: string; groupKey: string; label: string; shortLabel: string; count: number }
   | { type: "assets"; key: string; items: Array<{ asset: MemoryAsset; index: number }> };
 
 type VirtualTimelineGridProps = {
@@ -19,6 +19,12 @@ type VirtualTimelineGridProps = {
   onOpenAsset: (index: number) => void;
   onToggleFavorite: (asset: MemoryAsset) => void;
   onEditTags: (asset: MemoryAsset) => void;
+  /** Fixed tile columns from Settings; 0/undefined falls back to the responsive auto-fit. */
+  fixedColumns?: number;
+  /** Fired as the topmost visible row changes, so a timeline scrubber can track "where am I". */
+  onVisibleYearChange?: (year: number | null) => void;
+  /** Bump this after jumping the grid to a new offset, to scroll back to the top. */
+  resetScrollKey?: number;
 };
 
 const GRID_GAP = 14;
@@ -37,6 +43,9 @@ export default function VirtualTimelineGrid({
   onOpenAsset,
   onToggleFavorite,
   onEditTags,
+  fixedColumns,
+  onVisibleYearChange,
+  resetScrollKey,
 }: VirtualTimelineGridProps) {
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -56,7 +65,10 @@ export default function VirtualTimelineGrid({
     return () => observer.disconnect();
   }, [scrollElement]);
 
-  const columnCount = Math.max(2, Math.floor((Math.max(containerWidth, 320) + GRID_GAP) / (MIN_TILE_WIDTH + GRID_GAP)));
+  const columnCount =
+    fixedColumns && fixedColumns > 0
+      ? fixedColumns
+      : Math.max(2, Math.floor((Math.max(containerWidth, 320) + GRID_GAP) / (MIN_TILE_WIDTH + GRID_GAP)));
   const tileWidth = Math.max(132, Math.floor((Math.max(containerWidth, 320) - GRID_GAP * (columnCount - 1)) / columnCount));
   const tileHeight = Math.max(180, Math.floor(tileWidth * PORTRAIT_RATIO));
 
@@ -73,7 +85,14 @@ export default function VirtualTimelineGrid({
     const nextStickyIndexes: number[] = [];
     for (const [groupKey, group] of grouped.entries()) {
       nextStickyIndexes.push(nextRows.length);
-      nextRows.push({ type: "header", key: `${groupKey}-header`, label: group.label, shortLabel: group.shortLabel, count: group.items.length });
+      nextRows.push({
+        type: "header",
+        key: `${groupKey}-header`,
+        groupKey,
+        label: group.label,
+        shortLabel: group.shortLabel,
+        count: group.items.length,
+      });
       for (let index = 0; index < group.items.length; index += columnCount) {
         nextRows.push({ type: "assets", key: `${groupKey}-row-${index}`, items: group.items.slice(index, index + columnCount) });
       }
@@ -103,11 +122,28 @@ export default function VirtualTimelineGrid({
       if (hasNextPage && !isFetchingNextPage && remaining <= SCROLL_FETCH_THRESHOLD) {
         void fetchNextPage();
       }
+
+      if (onVisibleYearChange) {
+        const topItem = rowVirtualizer
+          .getVirtualItems()
+          .find((item) => item.start + item.size > scrollElement.scrollTop);
+        const row = topItem ? rows[topItem.index] : undefined;
+        const year = !row
+          ? null
+          : row.type === "header"
+            ? yearFromTakenAt(row.groupKey)
+            : yearFromTakenAt(row.items[0]?.asset.taken_at ?? null);
+        onVisibleYearChange(year);
+      }
     };
     handleScroll();
     scrollElement.addEventListener("scroll", handleScroll, { passive: true });
     return () => scrollElement.removeEventListener("scroll", handleScroll);
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage, scrollElement]);
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage, onVisibleYearChange, rowVirtualizer, rows, scrollElement]);
+
+  useEffect(() => {
+    scrollElement?.scrollTo({ top: 0 });
+  }, [resetScrollKey, scrollElement]);
 
   if (isInitialLoading) {
     return (
@@ -127,10 +163,10 @@ export default function VirtualTimelineGrid({
   }
 
   return (
-    <div className="min-h-0 flex-1">
+    <div className="relative min-h-0 flex-1">
       <div
         ref={handleScrollElementRef}
-        className="relative h-full min-h-0 overflow-auto overscroll-contain rounded-lg bg-surface p-3 ring-1 ring-divider [scrollbar-gutter:stable] sm:p-4"
+        className="relative h-full min-h-0 overflow-auto overscroll-contain [scrollbar-gutter:stable]"
       >
         <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative", width: "100%" }}>
           {rowVirtualizer.getVirtualItems().map((virtualRow) => {
@@ -147,12 +183,11 @@ export default function VirtualTimelineGrid({
             return (
               <div key={row.key} data-index={virtualRow.index} style={style}>
                 {row.type === "header" ? (
-                  <div className="pb-[14px] pt-1">
-                    <div className="flex items-center justify-between rounded-md bg-bg/92 px-4 py-2.5 ring-1 ring-divider backdrop-blur">
-                      <p className="text-sm font-medium text-fg">{row.label}</p>
-                      <span className="rounded-full bg-white/[0.04] px-3 py-1 text-xs uppercase tracking-[0.18em] text-neutral-400 ring-1 ring-divider">
-                        {row.count}
-                      </span>
+                  <div className="flex justify-center pb-[14px] pt-1">
+                    <div className="flex items-center gap-2 rounded-full bg-surface/82 px-4 py-2 text-xs shadow-[0_0_0_1px_var(--color-divider),0_8px_24px_rgba(0,0,0,0.4)] backdrop-blur">
+                      <CalendarDays className="h-3.5 w-3.5 text-accent" />
+                      <p className="font-medium text-fg">{row.label}</p>
+                      <span className="text-neutral-500">· {row.count}</span>
                     </div>
                   </div>
                 ) : (
@@ -191,6 +226,9 @@ export default function VirtualTimelineGrid({
           </div>
         ) : null}
       </div>
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[60px] bg-gradient-to-b from-bg to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[120px] bg-gradient-to-t from-bg to-transparent" />
     </div>
   );
 }

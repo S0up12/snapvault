@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics="">
+<link rel="stylesheet" href="_ds/nocturne-701c5718-6802-4af0-91ba-8a49d7e380e4/styles.css">
+<script src="_ds/nocturne-701c5718-6802-4af0-91ba-8a49d7e380e4/_ds_bundle.js"></script>
+<style>
+  body{margin:0;background:#0e0f1a;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:32px;font-family:"Inter",system-ui,sans-serif}
+</style>
+</helmet>
+<div style="width:1280px;background:var(--color-bg);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.5);overflow:hidden">
+  <!-- titlebar -->
+  <div style="display:flex;align-items:center;height:38px;padding:0 12px;gap:9px;border-bottom:1px solid var(--color-divider)">
+    <span style="flex:1"></span>
+    <span style="display:flex;gap:2px;color:var(--color-neutral-500)">
+      <span style="width:30px;height:24px;display:flex;align-items:center;justify-content:center"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6h8" stroke="currentColor" stroke-width="1.3"></path></svg></span>
+      <span style="width:30px;height:24px;display:flex;align-items:center;justify-content:center"><svg width="11" height="11" viewBox="0 0 12 12" fill="none"><rect x="2.5" y="2.5" width="7" height="7" rx="1.2" stroke="currentColor" stroke-width="1.3"></rect></svg></span>
+      <span style="width:30px;height:24px;display:flex;align-items:center;justify-content:center"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"></path></svg></span>
+    </span>
+  </div>
+  <!-- command bar -->
+  <div style="display:flex;align-items:center;height:58px;padding:0 22px;gap:10px;border-bottom:1px solid var(--color-divider)">
+    <span style="display:flex;align-items:center;gap:9px">
+      <span style="display:flex;color:var(--color-accent)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3.2" y="3.2" width="17.6" height="17.6" rx="5" stroke="currentColor" stroke-width="1.6"></rect><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.6"></circle><path d="M12 4.2v3M12 16.8v3M4.2 12h3M16.8 12h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg></span>
+      <span style="font-family:var(--font-heading);font-weight:500;font-size:16px">SnapVault</span>
+    </span>
+    <nav style="display:flex;gap:4px;margin:0 auto">
+      <sc-for list="{{ nav }}" as="n" hint-placeholder-count="4">
+        <a style="{{ n.style }}" style-hover="background:color-mix(in srgb,var(--color-accent) 8%,transparent)" onClick="{{ n.onClick }}">{{ n.label }}</a>
+      </sc-for>
+    </nav>
+    <span style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;border:1px solid var(--color-divider);border-radius:8px;color:var(--color-neutral-400);cursor:pointer" style-hover="background:var(--color-surface)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 5.5h16l-6 7v6l-4-2.2v-3.8L4 5.5Z"></path></svg></span>
+  </div>
+
+  <!-- ══════════════════ DASHBOARD ══════════════════ -->
+  <sc-if value="{{ isDash }}" hint-placeholder-val="{{ true }}">
+  <div style="padding:26px 28px 30px">
+    <div style="display:flex;align-items:flex-end;gap:12px;margin-bottom:22px">
+      <div><h2 style="font-size:26px;margin:0;letter-spacing:-.02em">Welcome back</h2><div style="font-size:11px;color:var(--color-neutral-500);letter-spacing:.16em;text-transform:uppercase;margin-top:6px">Last import · March 18, 2024</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:24px">
+      <div style="background:var(--color-surface);border-radius:8px;padding:16px 18px;box-shadow:0 0 0 1px #2c2f3d"><div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent)">Memories</div><div style="font-size:26px;font-weight:500;letter-spacing:-.02em;margin-top:8px">4,812</div></div>
+      <div style="background:var(--color-surface);border-radius:8px;padding:16px 18px;box-shadow:0 0 0 1px #2c2f3d"><div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-neutral-500)">Photos</div><div style="font-size:26px;font-weight:500;letter-spacing:-.02em;margin-top:8px">3,204</div></div>
+      <div style="background:var(--color-surface);border-radius:8px;padding:16px 18px;box-shadow:0 0 0 1px #2c2f3d"><div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-neutral-500)">Videos</div><div style="font-size:26px;font-weight:500;letter-spacing:-.02em;margin-top:8px">1,608</div></div>
+      <div style="background:var(--color-surface);border-radius:8px;padding:16px 18px;box-shadow:0 0 0 1px #2c2f3d"><div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-neutral-500)">Chat threads</div><div style="font-size:26px;font-weight:500;letter-spacing:-.02em;margin-top:8px">128</div></div>
+      <div style="background:var(--color-surface);border-radius:8px;padding:16px 18px;box-shadow:0 0 0 1px #2c2f3d"><div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-neutral-500)">Friends</div><div style="font-size:26px;font-weight:500;letter-spacing:-.02em;margin-top:8px">342</div></div>
+      <div style="background:var(--color-surface);border-radius:8px;padding:16px 18px;box-shadow:0 0 0 1px #2c2f3d"><div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-neutral-500)">Storage</div><div style="font-size:26px;font-weight:500;letter-spacing:-.02em;margin-top:8px">3.2<span style="font-size:15px;color:var(--color-neutral-400)"> GB</span></div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1.15fr 1fr;gap:20px">
+      <div style="background:var(--color-surface);border-radius:14px;padding:24px;box-shadow:0 0 0 1px #2c2f3d">
+        <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--color-accent)">Import</div>
+        <h3 style="font-size:19px;margin:8px 0 4px">Importing your export</h3>
+        <p style="font-size:13px;color:var(--color-neutral-400);margin:0 0 18px">2 of 3 archive parts processed · this can run in the background.</p>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 13px;border-radius:8px;background:color-mix(in srgb,var(--color-accent) 7%,transparent)"><span style="width:22px;height:22px;flex:none;border-radius:50%;background:color-mix(in srgb,var(--color-accent) 20%,transparent);display:flex;align-items:center;justify-content:center;color:var(--color-accent-200)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l4 4 10-10" stroke-linecap="round" stroke-linejoin="round"></path></svg></span><span style="font-size:13.5px;color:var(--color-accent-200)">Extracting files</span></div>
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 13px;border-radius:8px;background:color-mix(in srgb,var(--color-accent) 7%,transparent)"><span style="width:22px;height:22px;flex:none;border-radius:50%;background:color-mix(in srgb,var(--color-accent) 20%,transparent);display:flex;align-items:center;justify-content:center;color:var(--color-accent-200)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l4 4 10-10" stroke-linecap="round" stroke-linejoin="round"></path></svg></span><span style="font-size:13.5px;color:var(--color-accent-200)">Parsing metadata &amp; repairing timestamps</span></div>
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 13px;border-radius:8px;background:color-mix(in srgb,var(--color-accent) 7%,transparent)"><span style="width:22px;height:22px;flex:none;border-radius:50%;background:color-mix(in srgb,var(--color-accent) 20%,transparent);display:flex;align-items:center;justify-content:center;color:var(--color-accent-200)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l4 4 10-10" stroke-linecap="round" stroke-linejoin="round"></path></svg></span><span style="font-size:13.5px;color:var(--color-accent-200)">Importing chats &amp; profile</span></div>
+          <div style="padding:12px 13px;border-radius:8px;background:color-mix(in srgb,var(--color-accent) 12%,transparent);box-shadow:inset 2px 0 0 var(--color-accent)">
+            <div style="display:flex;align-items:center;gap:12px"><span style="width:22px;height:22px;flex:none;border-radius:50%;box-shadow:inset 0 0 0 2px var(--color-accent);display:flex;align-items:center;justify-content:center"><span style="width:8px;height:8px;border-radius:50%;background:var(--color-accent);box-shadow:0 0 10px 1px color-mix(in srgb,var(--color-accent) 70%,transparent)"></span></span><span style="font-size:13.5px;color:var(--color-accent);font-weight:500">Generating thumbnails &amp; converting videos</span></div>
+            <div style="margin:11px 0 0 34px"><div style="height:5px;border-radius:3px;background:var(--color-neutral-800);overflow:hidden"><div style="width:64%;height:100%;background:var(--color-accent);box-shadow:0 0 12px 1px color-mix(in srgb,var(--color-accent) 55%,transparent)"></div></div><div style="font-size:11px;color:var(--color-neutral-400);margin-top:7px">Compositing overlays · 2,140 / 3,340</div></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div style="background:var(--color-surface);border-radius:14px;padding:22px;box-shadow:0 0 0 1px #2c2f3d">
+          <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:14px"><h3 style="font-size:17px;margin:0">Flashbacks</h3><span style="flex:1"></span><a onClick="{{ goMemories }}" style="font-size:12.5px;color:var(--color-accent);text-decoration:none;cursor:pointer">Open Memories →</a></div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+            <sc-for list="{{ gToday }}" as="t" hint-placeholder-count="8">
+              <div style="position:relative;aspect-ratio:3/4;border-radius:8px;overflow:hidden;box-shadow:0 0 0 1px rgba(233,233,237,.05);background:{{ t.g }}">
+                <span style="position:absolute;inset:0;background:linear-gradient(to top,rgba(11,12,20,.42),transparent 42%)"></span>
+                <sc-if value="{{ t.video }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center"><span style="width:30px;height:30px;border-radius:50%;background:rgba(11,12,20,.5);display:flex;align-items:center;justify-content:center;color:#fff"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5-11-6.5Z"></path></svg></span></span></sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════════════ CHATS ══════════════════ -->
+  <sc-if value="{{ isChats }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;height:706px">
+    <div style="width:320px;flex:none;border-right:1px solid var(--color-divider);display:flex;flex-direction:column;padding:14px">
+      <div style="display:flex;align-items:center;gap:8px;height:36px;padding:0 12px;border-radius:8px;background:var(--color-surface);border:1px solid var(--color-divider);color:var(--color-neutral-500);font-size:13px;margin-bottom:10px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="6.4"></circle><path d="m16 16 4 4" stroke-linecap="round"></path></svg>Search people…</div>
+      <div style="display:flex;flex-direction:column;gap:2px;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;background:color-mix(in srgb,var(--color-accent) 12%,transparent);box-shadow:inset 2px 0 0 var(--color-accent)"><span style="width:40px;height:40px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:#fff;background:linear-gradient(135deg,#565a86,#2b2741)">WC</span><div style="min-width:0;flex:1"><div style="display:flex;justify-content:space-between;gap:6px"><span style="font-size:14px;color:var(--color-text)">Weekend crew</span><span style="font-size:11px;color:var(--color-neutral-500)">2h</span></div><div style="display:flex;align-items:center;gap:5px;margin-top:2px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-neutral-500)" stroke-width="1.8"><circle cx="9" cy="8" r="2.6"></circle><path d="M4 17a5 5 0 0 1 10 0"></path><path d="M16 6.5a2.6 2.6 0 0 1 0 5M20 17a5 5 0 0 0-4-4.9"></path></svg><span style="font-size:12px;color:var(--color-neutral-400);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Sam: that view was unreal 🏔️</span></div></div></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;cursor:pointer" style-hover="background:var(--color-surface)"><span style="width:40px;height:40px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:#fff;background:linear-gradient(135deg,#6b4a5c,#2b2741)">MJ</span><div style="min-width:0;flex:1"><div style="display:flex;justify-content:space-between;gap:6px"><span style="font-size:14px;color:var(--color-neutral-300)">Maya</span><span style="font-size:11px;color:var(--color-neutral-500)">1d</span></div><div style="font-size:12px;color:var(--color-neutral-500);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">sent a photo</div></div></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;cursor:pointer" style-hover="background:var(--color-surface)"><span style="width:40px;height:40px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:#fff;background:linear-gradient(135deg,#42624f,#2b2741)">TL</span><div style="min-width:0;flex:1"><div style="display:flex;justify-content:space-between;gap:6px"><span style="font-size:14px;color:var(--color-neutral-300)">Theo</span><span style="font-size:11px;color:var(--color-neutral-500)">3d</span></div><div style="font-size:12px;color:var(--color-neutral-500);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">haha see you then</div></div></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;cursor:pointer" style-hover="background:var(--color-surface)"><span style="width:40px;height:40px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:#fff;background:linear-gradient(135deg,#7d5f3c,#2b2741)">FA</span><div style="min-width:0;flex:1"><div style="display:flex;justify-content:space-between;gap:6px"><span style="font-size:14px;color:var(--color-neutral-300)">Family</span><span style="font-size:11px;color:var(--color-neutral-500)">1w</span></div><div style="display:flex;align-items:center;gap:5px;margin-top:2px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-neutral-500)" stroke-width="1.8"><circle cx="9" cy="8" r="2.6"></circle><path d="M4 17a5 5 0 0 1 10 0"></path><path d="M16 6.5a2.6 2.6 0 0 1 0 5M20 17a5 5 0 0 0-4-4.9"></path></svg><span style="font-size:12px;color:var(--color-neutral-500);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Mom: call me later ❤️</span></div></div></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;cursor:pointer" style-hover="background:var(--color-surface)"><span style="width:40px;height:40px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:#fff;background:linear-gradient(135deg,#3a5c6b,#2b2741)">NP</span><div style="min-width:0;flex:1"><div style="display:flex;justify-content:space-between;gap:6px"><span style="font-size:14px;color:var(--color-neutral-300)">Nina</span><span style="font-size:11px;color:var(--color-neutral-500)">2w</span></div><div style="font-size:12px;color:var(--color-neutral-500);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🔥🔥🔥</div></div></div>
+      </div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:12px;padding:16px 24px;border-bottom:1px solid var(--color-divider)">
+        <span style="width:40px;height:40px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:#fff;background:linear-gradient(135deg,#565a86,#2b2741)">WC</span>
+        <div style="line-height:1.25"><div style="font-size:15px">Weekend crew</div><div style="font-size:11.5px;color:var(--color-neutral-500)">3 people · 1,204 messages</div></div>
+      </div>
+      <div style="flex:1;overflow:hidden;padding:22px 26px;display:flex;flex-direction:column;gap:18px;background:linear-gradient(180deg,color-mix(in srgb,var(--color-surface) 30%,transparent),transparent 40%)">
+        <div style="max-width:64%"><div style="font-size:10.5px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--color-neutral-400);padding-left:2px">Alex</div><div style="display:flex;gap:11px;margin-top:6px"><span style="width:3px;flex:none;border-radius:3px;background:var(--color-neutral-600)"></span><div style="background:var(--color-surface);border-radius:4px 12px 12px 12px;padding:11px 15px;font-size:14px;box-shadow:0 0 0 1px #2c2f3d">who's driving up to the cabin saturday?</div></div></div>
+        <div style="max-width:64%;margin-left:auto"><div style="font-size:10.5px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--color-accent-300);padding-right:2px;text-align:right">You</div><div style="display:flex;gap:11px;margin-top:6px;flex-direction:row-reverse"><span style="width:3px;flex:none;border-radius:3px;background:var(--color-accent)"></span><div style="background:color-mix(in srgb,var(--color-accent) 14%,transparent);border-radius:12px 4px 12px 12px;padding:11px 15px;font-size:14px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--color-accent) 30%,transparent)">i can take my car, room for 3</div></div></div>
+        <div style="max-width:64%"><div style="font-size:10.5px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--color-neutral-400);padding-left:2px">Sam</div><div style="display:flex;gap:11px;margin-top:6px"><span style="width:3px;flex:none;border-radius:3px;background:var(--color-neutral-600)"></span><div style="background:var(--color-surface);border-radius:4px 12px 12px 12px;padding:11px;box-shadow:0 0 0 1px #2c2f3d"><div onClick="{{ openLightbox }}" style="position:relative;width:190px;aspect-ratio:3/4;border-radius:8px;overflow:hidden;background:linear-gradient(160deg,#3f5f5a,#172423);cursor:pointer"><span style="position:absolute;inset:0;background:linear-gradient(to top,rgba(11,12,20,.42),transparent 45%)"></span></div><div style="font-size:14px;padding:9px 5px 2px">that view was unreal 🏔️</div></div></div></div>
+        <div style="max-width:64%"><div style="font-size:10.5px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--color-neutral-400);padding-left:2px">Alex</div><div style="display:flex;gap:11px;margin-top:6px"><span style="width:3px;flex:none;border-radius:3px;background:var(--color-neutral-600)"></span><div style="background:var(--color-surface);border-radius:4px 12px 12px 12px;padding:11px 15px;font-size:14px;box-shadow:0 0 0 1px #2c2f3d">leaving at 9 then ☀️</div></div></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:14px 24px;border-top:1px solid var(--color-divider)">
+        <div style="flex:1;display:flex;align-items:center;height:38px;padding:0 14px;border-radius:999px;background:var(--color-surface);border:1px solid var(--color-divider);color:var(--color-neutral-500);font-size:13px">Message the crew…</div>
+        <span style="width:38px;height:38px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--color-accent);border:1px solid color-mix(in srgb,var(--color-accent) 40%,transparent);cursor:pointer" style-hover="background:color-mix(in srgb,var(--color-accent) 12%,transparent)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l16-7-7 16-2.5-6.5L4 12Z"></path></svg></span>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════════════ MEMORIES ══════════════════ -->
+  <sc-if value="{{ isMemories }}" hint-placeholder-val="{{ false }}">
+  <div style="position:relative;height:696px;overflow:hidden;padding:16px">
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px">
+      <sc-for list="{{ wall }}" as="t" hint-placeholder-count="24">
+        <div onClick="{{ openLightbox }}" style="position:relative;aspect-ratio:3/4;border-radius:8px;overflow:hidden;box-shadow:0 0 0 1px rgba(233,233,237,.05);background:{{ t.g }};cursor:pointer">
+          <span style="position:absolute;inset:0;background:linear-gradient(to top,rgba(11,12,20,.42),transparent 42%)"></span>
+          <sc-if value="{{ t.fav }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;top:9px;right:9px;color:#d2cefd;filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="m12 3 2.6 5.5 6 .8-4.4 4.2 1.1 6L12 16.8 6.7 19.5l1.1-6L3.4 9.3l6-.8L12 3Z"></path></svg></span></sc-if>
+          <sc-if value="{{ t.video }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center"><span style="width:40px;height:40px;border-radius:50%;background:rgba(11,12,20,.5);display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 0 0 1px rgba(255,255,255,.15)"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5-11-6.5Z"></path></svg></span></span></sc-if>
+        </div>
+      </sc-for>
+    </div>
+    <div style="position:absolute;top:28px;left:28px;z-index:5;display:flex;align-items:center;gap:8px;padding:8px 15px;border-radius:999px;background:color-mix(in srgb,var(--color-surface) 82%,transparent);backdrop-filter:blur(10px);box-shadow:0 0 0 1px var(--color-divider),0 8px 24px rgba(0,0,0,.4)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="1.7"><rect x="4" y="5.5" width="16" height="15" rx="2.5"></rect><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" stroke-linecap="round"></path></svg><span style="font-size:13px">This week · March 2024</span></div>
+    <div style="position:absolute;inset:0;bottom:auto;height:60px;background:linear-gradient(to bottom,var(--color-bg),transparent);pointer-events:none"></div>
+    <div style="position:absolute;inset:0;top:auto;height:120px;background:linear-gradient(to top,var(--color-bg),transparent);pointer-events:none"></div>
+    <div style="position:absolute;bottom:26px;left:50%;transform:translateX(-50%);z-index:6;display:flex;flex-direction:column;gap:6px;padding:14px 22px 12px;border-radius:20px;background:color-mix(in srgb,var(--color-surface) 88%,transparent);backdrop-filter:blur(12px);box-shadow:0 0 0 1px var(--color-divider),0 16px 40px rgba(0,0,0,.55)">
+      <div style="position:relative;width:440px;height:16px;display:flex;align-items:center">
+        <div style="position:absolute;left:0;right:0;top:50%;height:2px;transform:translateY(-50%);background:var(--color-neutral-700)"></div>
+        <div style="position:absolute;left:0;width:100%;top:50%;height:2px;transform:translateY(-50%);background:linear-gradient(to right,color-mix(in srgb,var(--color-accent) 25%,transparent),var(--color-accent))"></div>
+        <div style="position:absolute;right:-2px;top:50%;transform:translate(0,-50%);width:16px;height:16px;border-radius:50%;background:var(--color-accent);box-shadow:0 0 0 3px var(--color-surface),0 0 16px 3px color-mix(in srgb,var(--color-accent) 65%,transparent)"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;width:440px;font-size:10px;letter-spacing:.06em;color:var(--color-neutral-500)"><span>2019</span><span>2020</span><span>2021</span><span>2022</span><span>2023</span><span style="color:var(--color-accent);font-weight:600">2024</span></div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════════════ PROFILE ══════════════════ -->
+  <sc-if value="{{ isProfile }}" hint-placeholder-val="{{ false }}">
+  <div style="padding:26px 28px 30px">
+    <div style="position:relative;overflow:hidden;background:var(--color-surface);border-radius:14px;padding:26px;box-shadow:0 0 0 1px #2c2f3d;margin-bottom:20px">
+      <div style="position:absolute;top:-60px;right:-30px;width:320px;height:220px;background:radial-gradient(circle,color-mix(in srgb,var(--color-accent) 26%,transparent),transparent 68%);pointer-events:none"></div>
+      <div style="position:relative;display:flex;align-items:center;gap:20px">
+        <span style="width:76px;height:76px;flex:none;border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:600;color:#fff;background:linear-gradient(135deg,var(--color-accent-500),var(--color-accent-700));box-shadow:0 0 0 1px color-mix(in srgb,var(--color-accent) 40%,transparent)">SD</span>
+        <div style="min-width:0">
+          <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--color-accent)">Imported profile</div>
+          <h2 style="font-size:27px;margin:5px 0 0;letter-spacing:-.02em">Sammy de Vries</h2>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">
+            <span class="tag tag-neutral">@sammy_dv</span>
+            <span class="tag tag-neutral">Joined March 2019</span>
+            <span class="tag tag-neutral">Netherlands</span>
+            <span class="tag tag-outline">Snapscore 128,540</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+      <div style="background:var(--color-surface);border-radius:8px;padding:18px 20px;box-shadow:0 0 0 1px #2c2f3d;position:relative"><span style="position:absolute;top:16px;right:16px;color:var(--color-neutral-600)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="8" r="2.6"></circle><path d="M3.5 18a5.5 5.5 0 0 1 11 0"></path><path d="M16 5.6a2.8 2.8 0 0 1 0 5.4M21 18a5.5 5.5 0 0 0-4.3-5.3"></path></svg></span><div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent)">Friends</div><div style="font-size:28px;font-weight:500;letter-spacing:-.02em;margin-top:8px">342</div></div>
+      <div style="background:var(--color-surface);border-radius:8px;padding:18px 20px;box-shadow:0 0 0 1px #2c2f3d;position:relative"><span style="position:absolute;top:16px;right:16px;color:var(--color-neutral-600)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 4h12v3a4 4 0 0 1-8 0M8 4v4a4 4 0 0 0 8 0M9 19h6M12 14v5M5 5H3v1a3 3 0 0 0 3 3M19 5h2v1a3 3 0 0 1-3 3"></path></svg></span><div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-neutral-500)">Snapscore</div><div style="font-size:28px;font-weight:500;letter-spacing:-.02em;margin-top:8px">128,540</div></div>
+      <div style="background:var(--color-surface);border-radius:8px;padding:18px 20px;box-shadow:0 0 0 1px #2c2f3d;position:relative"><span style="position:absolute;top:16px;right:16px;color:var(--color-neutral-600)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="4" y="6.5" width="16" height="12" rx="2"></rect><path d="M4.4 15.5 8.5 12l3 2 3.5-3.5 4.6 3.7"></path></svg></span><div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-neutral-500)">Memories</div><div style="font-size:28px;font-weight:500;letter-spacing:-.02em;margin-top:8px">4,812</div></div>
+      <div style="background:var(--color-surface);border-radius:8px;padding:18px 20px;box-shadow:0 0 0 1px #2c2f3d;position:relative"><span style="position:absolute;top:16px;right:16px;color:var(--color-neutral-600)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8.5"></circle><path d="M9 14s1.2 1.5 3 1.5S15 14 15 14" stroke-linecap="round"></path><circle cx="9.2" cy="10" r="1" fill="currentColor" stroke="none"></circle><circle cx="14.8" cy="10" r="1" fill="currentColor" stroke="none"></circle></svg></span><div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-neutral-500)">Bitmoji opens</div><div style="font-size:28px;font-weight:500;letter-spacing:-.02em;margin-top:8px">1,203</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <div style="background:var(--color-surface);border-radius:14px;padding:22px;box-shadow:0 0 0 1px #2c2f3d">
+          <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--color-neutral-500);margin-bottom:14px">Account</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div style="background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:11px 13px"><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-500)">Display name</div><div style="font-size:14px;margin-top:4px">Sammy de Vries</div></div>
+            <div style="background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:11px 13px"><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-500)">Username</div><div style="font-size:14px;margin-top:4px">@sammy_dv</div></div>
+            <div style="background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:11px 13px"><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-500)">Created</div><div style="font-size:14px;margin-top:4px">March 4, 2019</div></div>
+            <div style="background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:11px 13px"><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-500)">Country</div><div style="font-size:14px;margin-top:4px">Netherlands</div></div>
+            <div style="background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:11px 13px"><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-500)">Language</div><div style="font-size:14px;margin-top:4px">English (UK)</div></div>
+            <div style="background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:11px 13px"><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-500)">Registration IP</div><div style="font-size:14px;margin-top:4px">84.25.·.·</div></div>
+          </div>
+        </div>
+        <div style="background:var(--color-surface);border-radius:14px;padding:22px;box-shadow:0 0 0 1px #2c2f3d">
+          <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--color-neutral-500);margin-bottom:14px">Friends</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
+            <div style="text-align:center;background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:12px 8px"><div style="font-size:22px;font-weight:500">342</div><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-500);margin-top:4px">Current</div></div>
+            <div style="text-align:center;background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:12px 8px"><div style="font-size:22px;font-weight:500">8</div><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-500);margin-top:4px">Blocked</div></div>
+            <div style="text-align:center;background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:12px 8px"><div style="font-size:22px;font-weight:500">54</div><div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-500);margin-top:4px">Deleted</div></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:7px">
+            <div style="display:flex;justify-content:space-between;align-items:center;background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:9px 13px"><span style="font-size:13.5px">Maya Jansen</span><span style="font-size:12px;color:var(--color-neutral-500)">@mayaj</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:9px 13px"><span style="font-size:13.5px">Theo Larsen</span><span style="font-size:12px;color:var(--color-neutral-500)">@theol</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:9px 13px"><span style="font-size:13.5px">Nina Park</span><span style="font-size:12px;color:var(--color-neutral-500)">@ninap</span></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <div style="background:var(--color-surface);border-radius:14px;padding:22px;box-shadow:0 0 0 1px #2c2f3d">
+          <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--color-neutral-500);margin-bottom:14px">Engagement</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+            <div style="background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:13px"><div style="font-size:19px;font-weight:500">12.4k</div><div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-neutral-500);margin-top:4px">App opens</div></div>
+            <div style="background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:13px"><div style="font-size:19px;font-weight:500">31.9k</div><div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-neutral-500);margin-top:4px">Story views</div></div>
+            <div style="background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:13px"><div style="font-size:19px;font-weight:500">18.2k</div><div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-neutral-500);margin-top:4px">Snap views</div></div>
+            <div style="background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:13px"><div style="font-size:19px;font-weight:500">9,880</div><div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-neutral-500);margin-top:4px">Chats sent</div></div>
+            <div style="background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:13px"><div style="font-size:19px;font-weight:500">14.1k</div><div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-neutral-500);margin-top:4px">Chats viewed</div></div>
+            <div style="background:color-mix(in srgb,var(--color-text) 4%,transparent);border-radius:8px;padding:13px"><div style="font-size:19px;font-weight:500">6,204</div><div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-neutral-500);margin-top:4px">Direct snaps</div></div>
+          </div>
+        </div>
+        <div style="background:var(--color-surface);border-radius:14px;padding:22px;box-shadow:0 0 0 1px #2c2f3d">
+          <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--color-neutral-500);margin-bottom:14px">Bitmoji</div>
+          <div style="display:flex;flex-direction:column;gap:1px">
+            <div style="display:flex;justify-content:space-between;padding:9px 2px;font-size:13.5px"><span style="color:var(--color-neutral-400)">Avatar gender</span><span>Neutral</span></div>
+            <div style="height:1px;background:linear-gradient(to right,transparent,var(--color-divider) 24px,var(--color-divider) calc(100% - 24px),transparent)"></div>
+            <div style="display:flex;justify-content:space-between;padding:9px 2px;font-size:13.5px"><span style="color:var(--color-neutral-400)">Outfit saves</span><span>47</span></div>
+            <div style="height:1px;background:linear-gradient(to right,transparent,var(--color-divider) 24px,var(--color-divider) calc(100% - 24px),transparent)"></div>
+            <div style="display:flex;justify-content:space-between;padding:9px 2px;font-size:13.5px"><span style="color:var(--color-neutral-400)">Shares</span><span>310</span></div>
+            <div style="height:1px;background:linear-gradient(to right,transparent,var(--color-divider) 24px,var(--color-divider) calc(100% - 24px),transparent)"></div>
+            <div style="display:flex;justify-content:space-between;padding:9px 2px;font-size:13.5px"><span style="color:var(--color-neutral-400)">Created</span><span>June 12, 2020</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════════════ SETTINGS ══════════════════ -->
+  <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+  <div style="padding:26px 28px 34px">
+    <div style="display:flex;align-items:flex-end;gap:12px;margin-bottom:22px">
+      <div><h2 style="font-size:26px;margin:0;letter-spacing:-.02em">Settings</h2><div style="font-size:11px;color:var(--color-neutral-500);letter-spacing:.16em;text-transform:uppercase;margin-top:6px">Vault · Sammy de Vries</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:200px 1fr;gap:24px">
+      <!-- settings menu -->
+      <nav style="display:flex;flex-direction:column;gap:2px">
+        <sc-for list="{{ settingsNav }}" as="s" hint-placeholder-count="5">
+          <a style="{{ s.style }}" style-hover="background:var(--color-surface)" onClick="{{ s.onClick }}">{{ s.label }}</a>
+        </sc-for>
+      </nav>
+      <!-- settings panel -->
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div style="background:var(--color-surface);border-radius:14px;padding:22px;box-shadow:0 0 0 1px #2c2f3d">
+          <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--color-accent);margin-bottom:4px">{{ settingsPanel.kicker }}</div>
+          <h3 style="font-size:18px;margin:0 0 16px">{{ settingsPanel.title }}</h3>
+          <div style="display:flex;flex-direction:column;gap:1px">
+            <sc-for list="{{ settingsPanel.rows }}" as="r" hint-placeholder-count="4">
+              <div>
+                <div style="display:flex;align-items:center;gap:16px;padding:13px 2px">
+                  <div style="flex:1;min-width:0"><div style="font-size:14px">{{ r.label }}</div><div style="font-size:12px;color:var(--color-neutral-500);margin-top:2px">{{ r.hint }}</div></div>
+                  <sc-if value="{{ r.isToggle }}" hint-placeholder-val="{{ true }}">
+                    <span onClick="{{ r.onToggle }}" style="{{ r.toggleTrack }}">
+                      <span style="{{ r.toggleKnob }}"></span>
+                    </span>
+                  </sc-if>
+                  <sc-if value="{{ r.isValue }}" hint-placeholder-val="{{ false }}">
+                    <span style="font-size:13.5px;color:var(--color-neutral-300)">{{ r.value }}</span>
+                  </sc-if>
+                </div>
+                <div style="height:1px;background:var(--color-divider)"></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:10px">
+          <span class="btn btn-ghost">Reset</span>
+          <span class="btn btn-primary">Save changes</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════════════ LIGHTBOX ══════════════════ -->
+  <sc-if value="{{ lightboxOpen }}" hint-placeholder-val="{{ false }}">
+  <div onClick="{{ closeLightbox }}" style="position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding:40px;background:rgba(8,9,16,.72);backdrop-filter:blur(6px)">
+    <div style="position:relative;display:flex;gap:0;width:min(940px,90vw);height:min(640px,84vh);border-radius:14px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.6)">
+      <div style="flex:1;min-width:0;background:linear-gradient(160deg,#3f5f5a,#0f1817);position:relative"></div>
+      <div style="width:300px;flex:none;background:var(--color-surface);border-left:1px solid var(--color-divider);padding:22px;display:flex;flex-direction:column;gap:16px">
+        <div style="display:flex;align-items:center;gap:10px"><span style="width:34px;height:34px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#fff;background:linear-gradient(135deg,#565a86,#2b2741)">SP</span><div style="line-height:1.25"><div style="font-size:14px">Sam Porter</div><div style="font-size:11.5px;color:var(--color-neutral-500)">March 16, 2024 · 4:12 PM</div></div></div>
+        <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent)">Details</div>
+        <div style="display:flex;flex-direction:column;gap:1px">
+          <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:13px"><span style="color:var(--color-neutral-400)">Type</span><span>Photo</span></div>
+          <div style="height:1px;background:var(--color-divider)"></div>
+          <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:13px"><span style="color:var(--color-neutral-400)">Saved from</span><span>Weekend crew</span></div>
+          <div style="height:1px;background:var(--color-divider)"></div>
+          <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:13px"><span style="color:var(--color-neutral-400)">Location</span><span>Hallstatt, AT</span></div>
+        </div>
+        <span style="flex:1"></span>
+        <div style="display:flex;gap:8px">
+          <span class="btn btn-secondary" style="flex:1;justify-content:center">Save</span>
+          <span class="btn btn-ghost" style="flex:1;justify-content:center">Share</span>
+        </div>
+      </div>
+      <span onClick="{{ closeLightbox }}" style="position:absolute;top:14px;right:14px;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(11,12,20,.6);color:#fff;cursor:pointer" style-hover="background:rgba(11,12,20,.85)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></span>
+    </div>
+  </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1344,&quot;height&quot;:900},&quot;defaultView&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;dashboard&quot;,&quot;options&quot;:[&quot;dashboard&quot;,&quot;chats&quot;,&quot;memories&quot;,&quot;profile&quot;,&quot;settings&quot;],&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { view: null, lightboxOpen: false, settingsSection: "account", toggles: { notifications: true, autoImport: true, faces: false, privateVault: true, memoriesReminder: true } };
+  setView(v) { this.setState({ view: v }); }
+  renderVals() {
+    const view = this.state.view ?? (this.props.defaultView || "dashboard");
+    const P = [
+      "linear-gradient(135deg,#3a4a6b,#1b2338)",
+      "linear-gradient(150deg,#6b4a5c,#281c29)",
+      "linear-gradient(160deg,#42624f,#182420)",
+      "linear-gradient(135deg,#7d5f3c,#291f1a)",
+      "linear-gradient(140deg,#565a86,#20233a)",
+      "linear-gradient(160deg,#3a5c6b,#182730)",
+      "linear-gradient(135deg,#8a6446,#2a1f1a)",
+      "linear-gradient(135deg,#4a4470,#1e1d36)",
+      "linear-gradient(150deg,#6a4a6b,#241a2b)",
+      "linear-gradient(160deg,#3f5f5a,#172423)",
+    ];
+    const mk = (specs) => specs.map((s, i) => ({ g: P[(s.p ?? i) % P.length], video: !!s.v, fav: !!s.f }));
+    const gToday = mk([{}, { v: 1 }, { f: 1, p: 3 }, {}, { p: 5 }, { v: 1, p: 6 }, {}, { p: 8 }]);
+    const wall = mk(Array.from({ length: 24 }, (_, i) => ({ p: i, v: i % 5 === 0, f: i % 7 === 3 })));
+
+    const base = "padding:8px 15px;border-radius:8px;font-size:14px;text-decoration:none;cursor:pointer;transition:background .12s;";
+    const items = [["dashboard", "Dashboard"], ["chats", "Chats"], ["memories", "Memories"], ["profile", "Profile"], ["settings", "Settings"]];
+    const nav = items.map(([key, label]) => ({
+      label, key,
+      style: base + (view === key
+        ? "color:var(--color-accent);background:color-mix(in srgb,var(--color-accent) 13%,transparent)"
+        : "color:var(--color-neutral-400)"),
+      onClick: () => this.setView(key),
+    }));
+
+    // ── Settings ──
+    const sBase = "display:flex;align-items:center;gap:10px;padding:10px 13px;border-radius:8px;font-size:14px;text-decoration:none;cursor:pointer;transition:background .12s;";
+    const sSection = this.state.settingsSection;
+    const sItems = [
+      ["account", "Account"], ["privacy", "Privacy"], ["notifications", "Notifications"],
+      ["import", "Import & data"], ["appearance", "Appearance"],
+    ];
+    const settingsNav = sItems.map(([key, label]) => ({
+      label, key,
+      style: sBase + (sSection === key
+        ? "color:var(--color-accent);background:color-mix(in srgb,var(--color-accent) 13%,transparent);box-shadow:inset 2px 0 0 var(--color-accent)"
+        : "color:var(--color-neutral-400)"),
+      onClick: () => this.setState({ settingsSection: key }),
+    }));
+
+    const tog = this.state.toggles;
+    const mkToggle = (key) => {
+      const on = tog[key];
+      return {
+        isToggle: true, isValue: false,
+        toggleTrack: "position:relative;width:40px;height:22px;flex:none;border-radius:999px;cursor:pointer;transition:background .15s;background:" + (on ? "var(--color-accent)" : "var(--color-neutral-700)"),
+        toggleKnob: "position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s;transform:translateX(" + (on ? "18px" : "0") + ")",
+        onToggle: () => this.setState((st) => ({ toggles: { ...st.toggles, [key]: !st.toggles[key] } })),
+      };
+    };
+    const mkValue = (value) => ({ isToggle: false, isValue: true, value });
+    const panels = {
+      account: { kicker: "Account", title: "Account details", rows: [
+        { label: "Display name", hint: "Shown across your vault", ...mkValue("Sammy de Vries") },
+        { label: "Username", hint: "Imported from your export", ...mkValue("@sammy_dv") },
+        { label: "Email", hint: "For account recovery", ...mkValue("sammy@socialdeal.nl") },
+        { label: "Country", hint: "Region for date & number formats", ...mkValue("Netherlands") },
+      ] },
+      privacy: { kicker: "Privacy", title: "Privacy & security", rows: [
+        { label: "Private vault", hint: "Require unlock to open the app", ...mkToggle("privateVault") },
+        { label: "Face grouping", hint: "Detect and group people in photos", ...mkToggle("faces") },
+        { label: "Visible to friends", hint: "Let imported friends see your vault", ...mkValue("Off") },
+        { label: "Two-factor auth", hint: "Extra step when signing in", ...mkValue("Enabled") },
+      ] },
+      notifications: { kicker: "Notifications", title: "Notifications", rows: [
+        { label: "Push notifications", hint: "Alerts on this device", ...mkToggle("notifications") },
+        { label: "Memories reminders", hint: "Resurface flashbacks weekly", ...mkToggle("memoriesReminder") },
+        { label: "Import updates", hint: "Notify when a job finishes", ...mkValue("Email only") },
+      ] },
+      import: { kicker: "Import & data", title: "Import & data", rows: [
+        { label: "Auto-import new exports", hint: "Watch for archives dropped in", ...mkToggle("autoImport") },
+        { label: "Original quality", hint: "Keep full-resolution media", ...mkValue("Always") },
+        { label: "Storage used", hint: "3.2 GB of 15 GB", ...mkValue("3.2 GB") },
+        { label: "Export vault", hint: "Download a full copy", ...mkValue("Download") },
+      ] },
+      appearance: { kicker: "Appearance", title: "Appearance", rows: [
+        { label: "Theme", hint: "Interface color scheme", ...mkValue("Nocturne (dark)") },
+        { label: "Grid density", hint: "Tiles per row in Memories", ...mkValue("6 columns") },
+        { label: "Reduce motion", hint: "Minimize transitions", ...mkValue("Off") },
+      ] },
+    };
+    const settingsPanel = panels[sSection] || panels.account;
+
+    return {
+      nav, gToday, wall,
+      isDash: view === "dashboard",
+      isChats: view === "chats",
+      isMemories: view === "memories",
+      isProfile: view === "profile",
+      isSettings: view === "settings",
+      settingsNav, settingsPanel,
+      lightboxOpen: this.state.lightboxOpen,
+      goMemories: () => this.setView("memories"),
+      openLightbox: () => this.setState({ lightboxOpen: true }),
+      closeLightbox: () => this.setState({ lightboxOpen: false }),
+    };
+  }
+}
+</script>
+</body>
+</html>

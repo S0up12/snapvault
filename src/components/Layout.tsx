@@ -3,7 +3,7 @@ import { Outlet, useLocation } from "react-router-dom";
 
 import NavBar from "./NavBar";
 import TitleBar from "./TitleBar";
-import { useMemoryTags } from "../hooks/useMemories";
+import { useMemoryTags, useMemoryYears } from "../hooks/useMemories";
 import type { MemoryFilter, MemorySort } from "../hooks/useMemories";
 
 export type ChatsScope = "all" | "group" | "private";
@@ -13,11 +13,14 @@ export type LayoutOutletContext = {
     sort: MemorySort;
     filter: MemoryFilter;
     tag: string | null;
+    year: number | null;
     setSort: (value: MemorySort) => void;
     setFilter: (value: MemoryFilter) => void;
     setTag: (value: string | null) => void;
+    setYear: (value: number | null) => void;
     availableTags: string[];
     refreshTags: () => Promise<void>;
+    availableYears: number[];
   };
   chatsFilters: {
     scope: ChatsScope;
@@ -32,12 +35,17 @@ export default function Layout() {
   const [sort, setSort] = useState<MemorySort>("desc");
   const [filter, setFilter] = useState<MemoryFilter>("all");
   const [tag, setTag] = useState<string | null>(null);
+  const [year, setYear] = useState<number | null>(null);
   const { tags: availableTags, refresh: refreshTags } = useMemoryTags();
+  // Always the full range for this filter/tag, regardless of the currently
+  // selected year - this feeds the Date filter's option list, which needs
+  // every year to switch to, not just the one currently active.
+  const availableYears = useMemoryYears(filter, tag, null);
 
   const [scope, setScope] = useState<ChatsScope>("all");
 
   const context: LayoutOutletContext = {
-    memoriesFilters: { sort, filter, tag, setSort, setFilter, setTag, availableTags, refreshTags },
+    memoriesFilters: { sort, filter, tag, year, setSort, setFilter, setTag, setYear, availableTags, refreshTags, availableYears },
     chatsFilters: { scope, setScope },
   };
 

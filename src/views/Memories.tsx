@@ -3,15 +3,18 @@ import { useOutletContext } from "react-router-dom";
 
 import Lightbox from "../components/Lightbox";
 import type { LayoutOutletContext } from "../components/Layout";
+import MemoryTimelineScrubber from "../components/memories/MemoryTimelineScrubber";
 import TagEditorModal from "../components/memories/TagEditorModal";
 import VirtualTimelineGrid from "../components/VirtualTimelineGrid";
-import { useMemories, type MemoryAsset } from "../hooks/useMemories";
+import { useMemories, useMemoryYears, type MemoryAsset } from "../hooks/useMemories";
+import { useViewerSettings } from "../hooks/useViewerSettings";
 
 export default function Memories() {
   const { memoriesFilters } = useOutletContext<LayoutOutletContext>();
-  const { sort, filter, tag, availableTags, refreshTags } = memoriesFilters;
+  const { sort, filter, tag, year, availableTags, refreshTags } = memoriesFilters;
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [tagEditorAsset, setTagEditorAsset] = useState<MemoryAsset | null>(null);
+  const [visibleYear, setVisibleYear] = useState<number | null>(null);
 
   const {
     assets,
@@ -21,12 +24,19 @@ export default function Memories() {
     hasNextPage,
     error,
     fetchNextPage,
+    jumpToYear,
+    jumpToken,
     toggleFavorite,
     updateTags,
-  } = useMemories(sort, filter, tag);
+  } = useMemories(sort, filter, tag, year);
+  // Distinct from Layout's availableYears (which ignores the date filter so
+  // the dropdown can always switch years) - the scrubber should reflect
+  // whatever the grid is actually showing right now, filtered or not.
+  const scrubberYears = useMemoryYears(filter, tag, year);
+  const { settings: viewerSettings } = useViewerSettings();
 
   return (
-    <section className="flex h-full min-h-0 w-full flex-col gap-3 overflow-hidden">
+    <section className="relative flex h-full min-h-0 w-full flex-col gap-3 overflow-hidden">
       <p className="px-1 text-xs uppercase tracking-[0.22em] text-neutral-500">
         {isLoading ? "Loading..." : `${total.toLocaleString()} ${total === 1 ? "memory" : "memories"}`}
       </p>
@@ -46,8 +56,21 @@ export default function Memories() {
             void toggleFavorite(asset);
           }}
           onEditTags={setTagEditorAsset}
+          fixedColumns={viewerSettings?.grid_columns}
+          onVisibleYearChange={setVisibleYear}
+          resetScrollKey={jumpToken}
         />
       )}
+
+      {!error ? (
+        <MemoryTimelineScrubber
+          years={scrubberYears}
+          activeYear={visibleYear}
+          onJump={(targetYear) => {
+            void jumpToYear(targetYear);
+          }}
+        />
+      ) : null}
 
       {selectedIndex !== null && assets[selectedIndex] ? (
         <Lightbox
