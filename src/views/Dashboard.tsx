@@ -41,8 +41,8 @@ export default function Dashboard() {
     <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-6">
       {ffmpegError ? (
         <div role="alert" className="rounded-md bg-surface px-4 py-3 text-[13px] text-amber-300 ring-1 ring-amber-400/40">
-          ffmpeg was not found on PATH, so thumbnails and video playback conversion will not work. Install ffmpeg
-          and restart SnapVault. <span className="text-neutral-500">({ffmpegError})</span>
+          ffmpeg wasn't found. The installed app bundles it; if you are running from source, install ffmpeg and
+          make sure it is on your PATH. <span className="text-neutral-500">({ffmpegError})</span>
         </div>
       ) : null}
 

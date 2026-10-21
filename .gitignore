@@ -93,3 +93,6 @@ $RECYCLE.BIN/
 *.njsproj
 *.sln
 *.sw?
+
+# --- Bundled ffmpeg sidecars (large; fetched by scripts/Fetch-Ffmpeg.ps1) ---
+src-tauri/binaries/

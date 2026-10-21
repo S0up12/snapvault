@@ -14,6 +14,7 @@ pub struct LibraryStats {
     pub audio: i64,
     pub thumbnails_missing: i64,
     pub playback_pending: i64,
+    pub playback_failed: i64,
     pub memory_items: i64,
     pub chat_threads: i64,
     pub chat_messages: i64,
@@ -47,7 +48,10 @@ pub fn get_library_stats(app: AppHandle, state: tauri::State<DbState>) -> Result
         thumbnails_missing: count(
             "SELECT COUNT(*) FROM assets WHERE media_type IN ('image', 'video') AND thumbnail_path IS NULL",
         )?,
-        playback_pending: count("SELECT COUNT(*) FROM assets WHERE media_type = 'video' AND playback_path IS NULL")?,
+        playback_pending: count(
+            "SELECT COUNT(*) FROM assets WHERE media_type = 'video' AND playback_path IS NULL AND playback_failed IS NULL",
+        )?,
+        playback_failed: count("SELECT COUNT(*) FROM assets WHERE playback_failed = 1")?,
         memory_items: count("SELECT COUNT(*) FROM memory_items")?,
         chat_threads: count("SELECT COUNT(*) FROM chat_threads")?,
         chat_messages: count("SELECT COUNT(*) FROM chat_messages")?,

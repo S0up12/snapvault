@@ -20,6 +20,8 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
+      # Downloads the ffmpeg/ffprobe sidecars (SHA256-verified) into src-tauri/binaries.
+      - run: pwsh scripts/Fetch-Ffmpeg.ps1
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -27,3 +29,5 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: SnapVault ${{ github.ref_name }}
           releaseDraft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          args: --config src-tauri/tauri.release.conf.json

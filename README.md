@@ -33,7 +33,7 @@ Everything happens locally. There is no account, no server and no upload. Your e
 
 Installers will be published on the [Releases](https://github.com/S0up12/snapvault/releases) page once the first version is tagged. Until then, run it from source (below).
 
-**Requirement:** SnapVault uses `ffmpeg` and `ffprobe` for thumbnails, overlays and video conversion. They must be on your `PATH`. The Dashboard shows a warning if they are missing. Bundling ffmpeg with the app is on the roadmap.
+**ffmpeg:** SnapVault uses `ffmpeg` and `ffprobe` for thumbnails, overlays and video conversion. The installer bundles them (see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for licensing). When running from source, they must be on your `PATH`, and the Dashboard shows a warning if they are missing.
 
 SnapVault is developed and tested on Windows 11. The code uses portable paths throughout, but macOS and Linux have not been tested yet.
 

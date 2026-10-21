@@ -51,6 +51,7 @@ export type IngestionSummary = {
   thumbnails_failed: number;
   playback_transcoded: number;
   playback_failed: number;
+  media_cancelled?: boolean;
 };
 
 type ThumbnailProgressEvent =

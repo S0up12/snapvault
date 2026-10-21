@@ -28,25 +28,47 @@ const PLAYBACK_SAFE_EXTENSIONS: &[&str] = &["mp4", "m4v"];
 /// Spawns `program` without flashing a console window. ffmpeg/ffprobe are
 /// console-subsystem binaries, so a plain `Command::new` pops a visible
 /// window on Windows every time this GUI app spawns one.
-fn no_window_command(program: &str) -> Command {
+fn no_window_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let mut cmd = Command::new(program);
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     cmd
 }
 
-/// Cheap availability probe: returns ffmpeg's first `-version` line, or Err
-/// when it isn't installed / on PATH (ffprobe ships alongside it).
+/// Pure part of `ffmpeg_program`: the sidecar next to the exe if it exists.
+fn sidecar_in(exe_dir: &Path, name: &str, exists: impl Fn(&Path) -> bool) -> Option<PathBuf> {
+    let file = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
+    let candidate = exe_dir.join(file);
+    exists(&candidate).then_some(candidate)
+}
+
+/// Bundled sidecar (Tauri puts externalBin next to the app exe) when present,
+/// else the bare name so PATH lookup keeps dev/CI working.
+fn ffmpeg_program(name: &str) -> std::ffi::OsString {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().and_then(|dir| sidecar_in(dir, name, |p| p.is_file())))
+        .map(PathBuf::into_os_string)
+        .unwrap_or_else(|| name.into())
+}
+
+fn is_bundled(name: &str) -> bool {
+    ffmpeg_program(name) != std::ffi::OsString::from(name)
+}
+
+/// Cheap availability probe: returns ffmpeg's first `-version` line plus
+/// "(bundled)" or "(system)", or Err when it isn't installed / on PATH.
 #[tauri::command]
 pub fn check_ffmpeg() -> Result<String, String> {
-    let output = no_window_command("ffmpeg")
+    let output = no_window_command(&ffmpeg_program("ffmpeg"))
         .arg("-version")
         .output()
         .map_err(|err| format!("ffmpeg not found on PATH: {err}"))?;
     if !output.status.success() {
         return Err(format!("ffmpeg -version exited with {}", output.status));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).lines().next().unwrap_or("ffmpeg").to_string())
+    let line = String::from_utf8_lossy(&output.stdout).lines().next().unwrap_or("ffmpeg").to_string();
+    Ok(format!("{line} ({})", if is_bundled("ffmpeg") { "bundled" } else { "system" }))
 }
 
 #[derive(Clone, Serialize)]
@@ -402,8 +424,8 @@ pub(crate) fn process_pending_media(
                     Op::Thumb(_) => summary.generated += 1,
                     Op::ThumbFailed | Op::ThumbSpawnFailed => summary.failed += 1,
                     Op::Playback { .. } => summary.playback_transcoded += 1,
-                    Op::PlaybackFailed => summary.playback_failed += 1,
-                    Op::Audio => {}
+                    Op::PlaybackFailed { .. } => summary.playback_failed += 1,
+                    Op::Audio | Op::PlaybackSafe(_) => {}
                 }
             }
             batch.push((id, ops));
@@ -538,7 +560,7 @@ static HW_STATE: (Mutex<HwState>, Condvar) = (Mutex::new(HwState::Unknown), Cond
 
 /// 1-second-ish synthetic encode; killed after 20s so a broken driver can't hang us.
 fn test_encode(enc: HwEncoder) -> bool {
-    let Ok(mut child) = no_window_command("ffmpeg")
+    let Ok(mut child) = no_window_command(&ffmpeg_program("ffmpeg"))
         .args(["-hide_banner", "-v", "error", "-f", "lavfi", "-i", "testsrc=s=256x256:r=10:d=1", "-frames:v", "10"])
         .args(enc.video_args())
         .args(["-f", "null", "-"])
@@ -569,7 +591,7 @@ static HW_BROKEN: AtomicBool = AtomicBool::new(false);
 
 /// `ffmpeg -encoders` stdout, killed after 10s.
 fn list_encoders() -> Result<String, String> {
-    let mut child = no_window_command("ffmpeg")
+    let mut child = no_window_command(&ffmpeg_program("ffmpeg"))
         .args(["-hide_banner", "-encoders"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -677,7 +699,7 @@ pub async fn detect_hw_encoders(force_refresh: Option<bool>) -> Result<Vec<HwEnc
 
 /// One ffmpeg transcode of `input` into `tmp_path` (removed on failure), one at a time.
 fn run_transcode(input: &Path, tmp_path: &Path, settings: &PerformanceSettings, enc: Option<HwEncoder>) -> Result<(), String> {
-    let mut command = no_window_command("ffmpeg");
+    let mut command = no_window_command(&ffmpeg_program("ffmpeg"));
     command.arg("-y");
     if enc.is_some() {
         command.args(["-hwaccel", "auto"]);
@@ -788,8 +810,19 @@ fn ensure_playback_run(db: &Mutex<Connection>, root: &Path, settings: &Performan
         needs_thumbnail: false,
         needs_playback: true,
     };
-    match ensure_playback_copy(&asset, settings, true)? {
-        None => Ok(done(&original_abs, false)),
+    let copy = ensure_playback_copy(&asset, settings, true);
+    if let Err(err) = &copy {
+        if is_definitive_failure(err) {
+            let mut batch = vec![(id.to_string(), vec![Op::PlaybackFailed { mark: true }])];
+            let _ = flush_ops(db, &mut batch);
+        }
+    }
+    match copy? {
+        None => {
+            let mut batch = vec![(id.to_string(), vec![Op::PlaybackSafe(original)])];
+            flush_ops(db, &mut batch)?;
+            Ok(done(&original_abs, false))
+        }
         Some(final_path) => {
             let mut batch = vec![(
                 id.to_string(),
@@ -824,7 +857,10 @@ enum Op {
     /// `final_path` is DB-relative; `old_path` is the absolute pre-transcode
     /// file, `Some` only when the extension changed (deleted after commit).
     Playback { final_path: String, old_path: Option<PathBuf> },
-    PlaybackFailed,
+    /// Original already playback-safe: record it as `playback_path` (DB-relative) so it isn't re-probed.
+    PlaybackSafe(String),
+    /// `mark`: definitive failure (corrupt/undecodable) -> `playback_failed = 1`; otherwise transient.
+    PlaybackFailed { mark: bool },
 }
 
 /// Slow, DB-free work for one asset (ffprobe + ffmpeg); never aborts the run.
@@ -838,6 +874,12 @@ fn converted_meanwhile(db: &Mutex<Connection>, root: &Path, id: &str) -> bool {
         conn.query_row("SELECT original_path, playback_path FROM assets WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
     drop(conn);
     row.is_some_and(|(orig, pb)| pb.as_deref() == Some(orig.as_str()) && crate::storage::to_absolute(root, &orig).is_file())
+}
+
+/// ffprobe/ffmpeg ran and rejected the file (e.g. "moov atom not found"), as
+/// opposed to a spawn failure or missing source, which may be transient.
+fn is_definitive_failure(err: &str) -> bool {
+    err.starts_with("ffprobe exited") || err.starts_with("ffmpeg exited")
 }
 
 fn process_one(asset: &PendingAsset, db: &Mutex<Connection>, root: &Path, thumbnail_dir: &Path, settings: &PerformanceSettings) -> Vec<Op> {
@@ -884,12 +926,12 @@ fn process_one(asset: &PendingAsset, db: &Mutex<Connection>, root: &Path, thumbn
                 final_path: crate::storage::to_relative(root, &final_path.display().to_string()),
                 old_path: (final_path != Path::new(&asset.original_path)).then(|| PathBuf::from(&asset.original_path)),
             }),
-            Ok(None) => {} // already browser-safe
+            Ok(None) => ops.push(Op::PlaybackSafe(crate::storage::to_relative(root, &asset.original_path))),
             Err(_) if cancelled() => {} // tmp file already removed by ensure_playback_copy
             Err(_) if converted_meanwhile(db, root, &asset.id) => {} // on-open run got there first
             Err(err) => {
                 crate::log::log_error!("[thumbnails] playback transcode failed for asset {}: {err}", asset.id);
-                ops.push(Op::PlaybackFailed);
+                ops.push(Op::PlaybackFailed { mark: is_definitive_failure(&err) });
             }
         }
     }
@@ -926,7 +968,15 @@ fn flush_ops(db: &Mutex<Connection>, batch: &mut Vec<(String, Vec<Op>)>) -> Resu
                         rusqlite::params![final_path, id],
                     )
                 }
-                Op::ThumbSpawnFailed | Op::PlaybackFailed => Ok(0),
+                Op::PlaybackSafe(path) => tx.execute(
+                    "UPDATE assets SET playback_path = ?1 WHERE id = ?2",
+                    rusqlite::params![path, id],
+                ),
+                Op::PlaybackFailed { mark: true } => {
+                    crate::log::log_warn!("[thumbnails] asset {id} marked playback_failed (undecodable)");
+                    tx.execute("UPDATE assets SET playback_failed = 1 WHERE id = ?1", [id])
+                }
+                Op::ThumbSpawnFailed | Op::PlaybackFailed { mark: false } => Ok(0),
             };
             r.map_err(|err| format!("failed to update asset {id}: {err}"))?;
         }
@@ -1041,7 +1091,7 @@ async fn run_and_emit(app: AppHandle, retry_failed: bool) -> Result<ThumbnailSum
         .ok_or_else(|| "Media processing is already running.".to_string())?;
     if retry_failed {
         if let Ok(conn) = app.state::<DbState>().0.lock() {
-            let _ = conn.execute("UPDATE assets SET thumb_failed = NULL", []);
+            let _ = conn.execute("UPDATE assets SET thumb_failed = NULL, playback_failed = NULL", []);
         }
     }
 
@@ -1122,11 +1172,11 @@ fn load_pending_assets(conn: &Connection, root: &Path) -> Result<Vec<PendingAsse
         .prepare(
             "SELECT id, media_type, original_path, overlay_path, playback_path,
                     thumbnail_path IS NULL AND thumb_failed IS NULL,
-                    media_type = 'video' AND (playback_path IS NULL OR playback_path != original_path)
+                    media_type = 'video' AND playback_failed IS NULL AND (playback_path IS NULL OR playback_path != original_path)
              FROM assets
              WHERE media_type IN ('image', 'video')
                AND ((thumbnail_path IS NULL AND thumb_failed IS NULL)
-                    OR (media_type = 'video' AND (playback_path IS NULL OR playback_path != original_path)))",
+                    OR (media_type = 'video' AND playback_failed IS NULL AND (playback_path IS NULL OR playback_path != original_path)))",
         )
         .map_err(|err| err.to_string())?;
     // PendingAsset carries absolute paths so all file/ffmpeg code is unchanged.
@@ -1154,7 +1204,7 @@ fn load_pending_assets(conn: &Connection, root: &Path) -> Result<Vec<PendingAsse
 /// uses this to detect and reclassify (see its doc comment).
 fn has_video_stream(path: &Path) -> Result<bool, String> {
     let output = run_output(
-        no_window_command("ffprobe")
+        no_window_command(&ffmpeg_program("ffprobe"))
             .args([
                 "-v", "error",
                 "-select_streams", "v",
@@ -1287,7 +1337,7 @@ fn needs_playback_transcode(path: &Path) -> Result<bool, String> {
     }
 
     let output = run_output(
-        no_window_command("ffprobe")
+        no_window_command(&ffmpeg_program("ffprobe"))
             .args(["-v", "error", "-show_entries", "stream=codec_name,codec_type", "-of", "json"])
             .arg(path),
     )
@@ -1370,7 +1420,7 @@ fn run_thumbnail_ffmpeg(
     output_path: &Path,
     settings: &PerformanceSettings,
 ) -> Result<(), String> {
-    let mut command = no_window_command("ffmpeg");
+    let mut command = no_window_command(&ffmpeg_program("ffmpeg"));
     command.args(["-y", "-i"]).arg(input);
     if let Some(thread_cap) = settings.ffmpeg_thread_cap() {
         command.args(["-threads", &thread_cap.to_string()]);
@@ -1426,7 +1476,6 @@ fn run_thumbnail_ffmpeg(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema::SCHEMA_SQL;
 
     #[test]
     fn busy_flag_tracks_slot_state() {
@@ -1443,7 +1492,7 @@ mod tests {
     #[test]
     fn load_pending_assets_excludes_audio_and_already_thumbnailed() {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(SCHEMA_SQL).unwrap();
+        crate::db::migrate(&conn, crate::db::MIGRATIONS, Path::new("/none")).unwrap();
 
         conn.execute(
             "INSERT INTO assets (id, media_type, original_path) VALUES ('img', 'image', '/a.jpg')",
@@ -1495,7 +1544,7 @@ mod tests {
         assert!(gen.status.success());
 
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(SCHEMA_SQL).unwrap();
+        crate::db::migrate(&conn, crate::db::MIGRATIONS, Path::new("/none")).unwrap();
         const N: usize = 200;
         for i in 0..N {
             let p = dir.join(format!("{i}.png"));
@@ -1587,7 +1636,7 @@ mod tests {
             .unwrap();
         assert!(gen.status.success());
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(SCHEMA_SQL).unwrap();
+        crate::db::migrate(&conn, crate::db::MIGRATIONS, Path::new("/none")).unwrap();
         const N: usize = 120;
         for i in 0..N {
             let p = dir.join(format!("{i}.png"));
@@ -1674,7 +1723,7 @@ mod tests {
         // set but playback_path NULL - it must still be picked up so
         // existing libraries get backfilled, not just newly-imported ones.
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(SCHEMA_SQL).unwrap();
+        crate::db::migrate(&conn, crate::db::MIGRATIONS, Path::new("/none")).unwrap();
         conn.execute(
             "INSERT INTO assets (id, media_type, original_path, thumbnail_path) VALUES ('vid', 'video', '/b.mp4', '/b.webp')",
             [],
@@ -1694,7 +1743,7 @@ mod tests {
         // still needs picking up so it gets folded in and the duplicate
         // reclaimed, not left alone forever.
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(SCHEMA_SQL).unwrap();
+        crate::db::migrate(&conn, crate::db::MIGRATIONS, Path::new("/none")).unwrap();
         conn.execute(
             "INSERT INTO assets (id, media_type, original_path, thumbnail_path, playback_path)
              VALUES ('vid', 'video', '/b.mp4', '/b.webp', '/playback/vid.mp4')",
@@ -1814,7 +1863,7 @@ mod tests {
             return None;
         }
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(SCHEMA_SQL).unwrap();
+        crate::db::migrate(&conn, crate::db::MIGRATIONS, Path::new("/none")).unwrap();
         conn.execute(
             "INSERT INTO assets (id, media_type, original_path, thumbnail_path) VALUES ('v', 'video', ?1, 't.webp')",
             [p.display().to_string()],
@@ -1909,5 +1958,63 @@ mod tests {
         };
         let err = ensure_playback_copy(&asset, &PerformanceSettings::default(), false).unwrap_err();
         assert!(err.contains("source file missing"));
+    }
+
+    #[test]
+    fn sidecar_resolver_prefers_existing_exe_dir_file() {
+        let dir = Path::new("app");
+        let file = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+        assert_eq!(sidecar_in(dir, "ffmpeg", |_| true), Some(dir.join(file)));
+        assert_eq!(sidecar_in(dir, "ffmpeg", |_| false), None);
+    }
+
+    fn mem_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&conn, crate::db::MIGRATIONS, Path::new("/none")).unwrap();
+        conn
+    }
+
+    #[test]
+    fn definitive_failure_is_marked_and_not_pending_again() {
+        let db = Mutex::new(mem_db());
+        db.lock().unwrap().execute(
+            "INSERT INTO assets (id, media_type, original_path, thumbnail_path) VALUES ('v', 'video', 'v.mp4', 't.webp')", []).unwrap();
+        assert!(is_definitive_failure("ffprobe exited with exit code: 1: moov atom not found"));
+        assert!(!is_definitive_failure("failed to run ffprobe (is it installed and on PATH?): x"));
+        assert_eq!(load_pending_assets(&db.lock().unwrap(), Path::new("/r")).unwrap().len(), 1);
+        flush_ops(&db, &mut vec![("v".into(), vec![Op::PlaybackFailed { mark: false }])]).unwrap();
+        assert_eq!(load_pending_assets(&db.lock().unwrap(), Path::new("/r")).unwrap().len(), 1);
+        flush_ops(&db, &mut vec![("v".into(), vec![Op::PlaybackFailed { mark: true }])]).unwrap();
+        assert_eq!(load_pending_assets(&db.lock().unwrap(), Path::new("/r")).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn safe_original_is_recorded_as_playback_path() {
+        let db = Mutex::new(mem_db());
+        db.lock().unwrap().execute(
+            "INSERT INTO assets (id, media_type, original_path, thumbnail_path) VALUES ('v', 'video', 'imports/v.mp4', 't.webp')", []).unwrap();
+        flush_ops(&db, &mut vec![("v".into(), vec![Op::PlaybackSafe("imports/v.mp4".into())])]).unwrap();
+        let pb: Option<String> = db.lock().unwrap().query_row("SELECT playback_path FROM assets WHERE id='v'", [], |r| r.get(0)).unwrap();
+        assert_eq!(pb.as_deref(), Some("imports/v.mp4"));
+        assert!(load_pending_assets(&db.lock().unwrap(), Path::new("/r")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn ensure_playback_records_safe_original_and_marks_corrupt() {
+        let Some((dir, db)) = video_fixture(&["-c:v", "libx264", "-pix_fmt", "yuv420p"], "mp4") else { return };
+        // Own id: INFLIGHT is process-global and sibling tests use "v".
+        db.lock().unwrap().execute("UPDATE assets SET id = 'safe' WHERE id = 'v'", []).unwrap();
+        ensure_playback_for(&db, &dir, &PerformanceSettings::default(), "safe").unwrap();
+        let pb: Option<String> = db.lock().unwrap().query_row("SELECT playback_path FROM assets WHERE id='safe'", [], |r| r.get(0)).unwrap();
+        assert!(pb.is_some_and(|p| p.ends_with("v.mp4")));
+        // Corrupt file: truncated garbage with an mp4 extension.
+        std::fs::write(dir.join("bad.mp4"), b"not a real mp4 at all").unwrap();
+        db.lock().unwrap().execute(
+            "INSERT INTO assets (id, media_type, original_path, thumbnail_path) VALUES ('bad', 'video', ?1, 't.webp')",
+            [dir.join("bad.mp4").display().to_string()]).unwrap();
+        assert!(ensure_playback_for(&db, &dir, &PerformanceSettings::default(), "bad").is_err());
+        let f: Option<i64> = db.lock().unwrap().query_row("SELECT playback_failed FROM assets WHERE id='bad'", [], |r| r.get(0)).unwrap();
+        assert_eq!(f, Some(1));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

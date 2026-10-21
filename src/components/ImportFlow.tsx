@@ -181,6 +181,12 @@ export default function ImportFlow() {
             <Stat label="Thumbnails generated" value={summary.thumbnails_generated} />
             <Stat label="Videos converted" value={summary.playback_transcoded} />
           </div>
+          {summary.media_cancelled ? (
+            <p className="mt-3 text-xs text-amber-300">
+              Import finished, but media processing was cancelled - thumbnails and video conversions are still
+              queued. Use Reprocess media in Settings &gt; Performance to finish them.
+            </p>
+          ) : null}
         </div>
       ) : null}
 

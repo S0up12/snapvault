@@ -8,6 +8,7 @@ export type LibraryStats = {
   audio: number;
   thumbnails_missing: number;
   playback_pending: number;
+  playback_failed: number;
   memory_items: number;
   chat_threads: number;
   chat_messages: number;

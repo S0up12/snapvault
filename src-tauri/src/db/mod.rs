@@ -24,7 +24,7 @@ type Migration = fn(&Connection, &Path) -> rusqlite::Result<()>;
 /// v1 baseline, and fresh databases replay every later migration on top of it.
 /// Plain DDL (ALTER TABLE, CREATE INDEX, table rebuild for CHECK/type changes)
 /// is fine; avoid `PRAGMA`s that cannot run inside a transaction.
-pub(crate) const MIGRATIONS: &[Migration] = &[migrate_v1_baseline, migrate_v2_relative_paths];
+pub(crate) const MIGRATIONS: &[Migration] = &[migrate_v1_baseline, migrate_v2_relative_paths, migrate_v3_playback_failed];
 
 /// v1 baseline = schema.rs + every column that used to be added ad hoc + the
 /// is_sender backfill. Idempotent, so it is also correct for legacy databases
@@ -59,6 +59,11 @@ fn migrate_v2_relative_paths(conn: &Connection, root: &Path) -> rusqlite::Result
         }
     }
     Ok(())
+}
+
+/// v3: marks videos whose probe/transcode failed definitively so they stop being retried.
+fn migrate_v3_playback_failed(conn: &Connection, _root: &Path) -> rusqlite::Result<()> {
+    add_column_if_missing(conn, "assets", "playback_failed", "INTEGER")
 }
 
 /// Applies pending migrations, each in its own transaction with its version bump.
@@ -202,6 +207,18 @@ mod tests {
             .query_row("SELECT is_sender FROM chat_messages WHERE id='m1'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(s, Some(1));
+    }
+
+    #[test]
+    fn v3_adds_playback_failed_to_a_v2_db() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn, &MIGRATIONS[..2], Path::new("/none")).unwrap();
+        conn.execute("INSERT INTO assets (id, media_type, original_path) VALUES ('a', 'video', 'p')", []).unwrap();
+        assert!(conn.prepare("SELECT playback_failed FROM assets").is_err());
+        migrate(&conn, MIGRATIONS, Path::new("/none")).unwrap();
+        assert_eq!(version(&conn), 3);
+        let v: Option<i64> = conn.query_row("SELECT playback_failed FROM assets WHERE id='a'", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, None);
     }
 
     #[test]

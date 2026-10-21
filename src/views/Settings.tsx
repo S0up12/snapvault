@@ -208,7 +208,8 @@ function LibraryStatsPanel() {
           <Stat label="Videos" value={stats.videos} />
           <Stat label="Audio" value={stats.audio} />
           <Stat label="Thumbnails missing" value={stats.thumbnails_missing} />
-          <Stat label="Videos pending conversion" value={stats.playback_pending} />
+          <Stat label="Videos not yet checked for playback" value={stats.playback_pending} />
+          {stats.playback_failed > 0 ? <Stat label="Unplayable videos" value={stats.playback_failed} /> : null}
           <Stat label="Memory items" value={stats.memory_items} />
           <Stat label="Chat threads" value={stats.chat_threads} />
           <Stat label="Chat messages" value={stats.chat_messages} />
