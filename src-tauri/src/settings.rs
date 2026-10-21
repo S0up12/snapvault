@@ -39,12 +39,13 @@ pub enum TranscodeMode {
     OnOpen,
 }
 
-/// Hardware encoder choice. Persisted only for now; behavior lands in a later step.
+/// Hardware encoder choice. `Auto` (the default) test-encodes each GPU encoder
+/// first and falls back to libx264, so it is safe on machines without a working GPU.
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum HwAccel {
-    Auto,
     #[default]
+    Auto,
     Off,
     Nvenc,
     Qsv,
@@ -206,7 +207,7 @@ mod tests {
     fn old_performance_file_loads_with_new_defaults() {
         let s: PerformanceSettings = serde_json::from_str(r#"{"transcode_preset":"fastest","limit_cpu_usage":true}"#).unwrap();
         assert!(s.limit_cpu_usage && s.process_on_startup);
-        assert_eq!((s.transcode_mode, s.hw_accel), (TranscodeMode::Background, HwAccel::Off));
+        assert_eq!((s.transcode_mode, s.hw_accel), (TranscodeMode::Background, HwAccel::Auto));
         let s: PerformanceSettings = serde_json::from_str("{}").unwrap();
         assert!(s.process_on_startup);
         let v = serde_json::to_value(PerformanceSettings { transcode_mode: TranscodeMode::OnOpen, hw_accel: HwAccel::Nvenc, ..Default::default() }).unwrap();

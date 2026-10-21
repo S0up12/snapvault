@@ -14,6 +14,7 @@ All notable changes to SnapVault. Format: [Keep a Changelog](https://keepachange
 - Accessible dialogs (focus trap, roles, Escape) and keyboard-reachable tile actions.
 
 ### Changed
+- Hardware-accelerated video conversion is now on "Auto" by default (falls back to the CPU encoder when no GPU encoder works). Existing saved settings are kept.
 - Ingestion runs each phase in one transaction (much faster imports) and is idempotent on re-import.
 - Thumbnail generation uses a bounded worker pool (transcodes stay serialized).
 - Year filtering is index-backed; the Memories grid no longer re-renders every tile on scroll.
