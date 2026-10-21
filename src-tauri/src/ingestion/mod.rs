@@ -759,3 +759,10 @@ mod tests {
         dir
     }
 }
+
+/// Reads the file as bytes once and parses from the slice (no UTF-8 `String`
+/// copy). `from_reader` would use less memory but is ~2x slower to parse.
+pub(super) fn read_json_file(path: &Path) -> Result<serde_json::Value, String> {
+    let bytes = fs::read(path).map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    serde_json::from_slice(&bytes).map_err(|err| format!("failed to parse {}: {err}", path.display()))
+}

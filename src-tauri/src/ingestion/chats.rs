@@ -266,10 +266,7 @@ fn load_chat_history(part_dirs: &[PathBuf]) -> Result<HashMap<String, Vec<Value>
         if !path.is_file() {
             continue;
         }
-        let contents = fs::read_to_string(&path)
-            .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
-        let payload: Value = serde_json::from_str(&contents)
-            .map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
+        let payload = super::read_json_file(&path)?;
         let Value::Object(map) = payload else {
             continue;
         };
@@ -290,10 +287,7 @@ fn load_friends_display_names(part_dirs: &[PathBuf]) -> Result<HashMap<String, S
         if !path.is_file() {
             continue;
         }
-        let contents = fs::read_to_string(&path)
-            .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
-        let payload: Value = serde_json::from_str(&contents)
-            .map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
+        let payload = super::read_json_file(&path)?;
         let Some(friends) = payload.get("Friends").and_then(|v| v.as_array()) else {
             continue;
         };
@@ -622,5 +616,54 @@ mod tests {
             )
             .unwrap();
         assert_eq!(title, Some("Nick".to_string()));
+    }
+
+    struct Counting;
+    static CUR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static PEAK: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    unsafe impl std::alloc::GlobalAlloc for Counting {
+        unsafe fn alloc(&self, l: std::alloc::Layout) -> *mut u8 {
+            use std::sync::atomic::Ordering::Relaxed;
+            let c = CUR.fetch_add(l.size(), Relaxed) + l.size();
+            PEAK.fetch_max(c, Relaxed);
+            std::alloc::System.alloc(l)
+        }
+        unsafe fn dealloc(&self, p: *mut u8, l: std::alloc::Layout) {
+            CUR.fetch_sub(l.size(), std::sync::atomic::Ordering::Relaxed);
+            std::alloc::System.dealloc(p, l)
+        }
+        unsafe fn realloc(&self, p: *mut u8, l: std::alloc::Layout, n: usize) -> *mut u8 {
+            use std::sync::atomic::Ordering::Relaxed;
+            if n >= l.size() {
+                let c = CUR.fetch_add(n - l.size(), Relaxed) + n - l.size();
+                PEAK.fetch_max(c, Relaxed);
+            } else {
+                CUR.fetch_sub(l.size() - n, Relaxed);
+            }
+            std::alloc::System.realloc(p, l, n)
+        }
+    }
+    #[global_allocator]
+    static A: Counting = Counting;
+
+    /// Run: cargo test bench_load_chat_history -- --nocapture --test-threads=1
+    #[test]
+    fn bench_load_chat_history() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let msgs: Vec<Value> = (0..400_000)
+            .map(|i| serde_json::json!({"From":"bob","Media Type":"TEXT","Content":format!("hello world message number {i} lorem ipsum dolor"),"Created":"2023-01-01 10:00:00 UTC","Created(microseconds)":i,"IsSender":false}))
+            .collect();
+        let part = part_dir_with_chat_history(&serde_json::json!({ "alice": msgs }));
+        drop(msgs);
+        let size = fs::metadata(part.join("json").join("chat_history.json")).unwrap().len();
+        let base = CUR.load(Relaxed);
+        PEAK.store(base, Relaxed);
+        let t = std::time::Instant::now();
+        let out = load_chat_history(&[part]).unwrap();
+        let el = t.elapsed();
+        let peak = PEAK.load(Relaxed) - base;
+        let live = CUR.load(Relaxed) - base;
+        println!("file {} MB: {:?}, peak extra {} MB, retained {} MB", size >> 20, el, peak >> 20, live >> 20);
+        assert_eq!(out["alice"].len(), 400_000);
     }
 }

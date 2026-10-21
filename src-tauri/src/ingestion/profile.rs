@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
@@ -65,10 +64,7 @@ fn read_json(part_dirs: &[PathBuf], filename: &str) -> Result<Option<Value>, Str
     for part_dir in part_dirs {
         let path = part_dir.join("json").join(filename);
         if path.is_file() {
-            let contents = fs::read_to_string(&path)
-                .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
-            let value: Value = serde_json::from_str(&contents)
-                .map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
+            let value = super::read_json_file(&path)?;
             return Ok(Some(value));
         }
     }
@@ -155,6 +151,7 @@ fn build_snapshot_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use crate::db::schema::SCHEMA_SQL;
     use uuid::Uuid;
 

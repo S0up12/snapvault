@@ -205,15 +205,12 @@ fn load_saved_media(part_dirs: &[PathBuf]) -> Result<Vec<JsonMemoryItem>, String
         if !json_path.is_file() {
             continue;
         }
-        let contents = fs::read_to_string(&json_path)
-            .map_err(|err| format!("failed to read {}: {err}", json_path.display()))?;
-        let payload: Value = serde_json::from_str(&contents)
-            .map_err(|err| format!("failed to parse {}: {err}", json_path.display()))?;
-        let saved_media = payload
-            .get("Saved Media")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
+        let payload = super::read_json_file(&json_path)?;
+        let mut payload = payload;
+        let saved_media = match payload.get_mut("Saved Media").map(Value::take) {
+            Some(Value::Array(a)) => a,
+            _ => Vec::new(),
+        };
 
         // Dedup only guards against the same memories_history.json being
         // repeated verbatim in more than one export part - it must NOT drop
