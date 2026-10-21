@@ -1568,7 +1568,7 @@ mod tests {
             assert!(processed >= last.swap(processed, Ordering::SeqCst), "progress not monotonic");
         };
         let start = std::time::Instant::now();
-        let summary = process_pending_media(&db, &dir, &PerformanceSettings::default(), &Arc::new(MediaControl::default()), &emit).unwrap();
+        let summary = process_pending_media(&db, &dir, &test_settings(), &Arc::new(MediaControl::default()), &emit).unwrap();
         let secs = start.elapsed().as_secs_f64();
         eprintln!("bench_thumbnails: {} assets in {secs:.2}s = {:.1}/s", N + 1, (N + 1) as f64 / secs);
 
@@ -1654,7 +1654,7 @@ mod tests {
 
         let summary = std::thread::scope(|s| {
             let h = s.spawn(|| {
-                let r = process_pending_media(&db, &dir, &PerformanceSettings::default(), &ctl, &|_, _, _| {});
+                let r = process_pending_media(&db, &dir, &test_settings(), &ctl, &|_, _, _| {});
                 done.store(true, Ordering::SeqCst);
                 r
             });
@@ -1706,7 +1706,7 @@ mod tests {
             needs_thumbnail: true,
             needs_playback: false,
         };
-        let err = generate_one_thumbnail(&asset, Path::new("/tmp/out.webp"), &PerformanceSettings::default()).unwrap_err();
+        let err = generate_one_thumbnail(&asset, Path::new("/tmp/out.webp"), &test_settings()).unwrap_err();
         assert!(err.contains("source file missing"));
     }
 
@@ -1788,7 +1788,7 @@ mod tests {
             needs_playback: true,
         };
 
-        let result = ensure_playback_copy(&asset, &PerformanceSettings::default(), false).unwrap();
+        let result = ensure_playback_copy(&asset, &test_settings(), false).unwrap();
         let final_path = result.expect("mpeg4 input should need a playback-safe transcode");
 
         // Transcoded in place: same path, no second file, content replaced.
@@ -1819,7 +1819,7 @@ mod tests {
             needs_playback: true,
         };
 
-        let result = ensure_playback_copy(&asset, &PerformanceSettings::default(), false).unwrap();
+        let result = ensure_playback_copy(&asset, &test_settings(), false).unwrap();
         let final_path = result.expect("should fold the side-by-side copy in");
 
         assert_eq!(final_path, original_path);
@@ -1843,6 +1843,11 @@ mod tests {
         assert_eq!(choose_encoder(HwAccel::Amf, only_qsv), None);
         assert_eq!(choose_encoder(HwAccel::Qsv, only_qsv), Some(Qsv));
         assert_eq!(choose_encoder(HwAccel::Nvenc, none), None);
+    }
+
+    /// Hardware off: conversion tests must not trigger real GPU detection or share its global state.
+    fn test_settings() -> PerformanceSettings {
+        PerformanceSettings { hw_accel: HwAccel::Off, ..Default::default() }
     }
 
     /// Fixture in a fresh dir plus a DB with one video row; None if ffmpeg/the codec is missing.
@@ -1875,7 +1880,8 @@ mod tests {
     #[test]
     fn ensure_playback_returns_immediately_for_safe_mp4() {
         let Some((dir, db)) = video_fixture(&["-c:v", "libx264", "-pix_fmt", "yuv420p"], "mp4") else { return };
-        let info = ensure_playback_for(&db, &dir, &PerformanceSettings::default(), "v").unwrap();
+        db.lock().unwrap().execute("UPDATE assets SET id = 'safe-mp4' WHERE id = 'v'", []).unwrap();
+        let info = ensure_playback_for(&db, &dir, &test_settings(), "safe-mp4").unwrap();
         assert!(!info.converted);
         assert!(info.path.ends_with("v.mp4"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1884,27 +1890,28 @@ mod tests {
     #[test]
     fn ensure_playback_converts_hevc_and_coalesces() {
         let Some((dir, db)) = video_fixture(&["-c:v", "libx265", "-pix_fmt", "yuv420p"], "mp4") else { return };
-        let s = PerformanceSettings::default();
+        db.lock().unwrap().execute("UPDATE assets SET id = 'hevc' WHERE id = 'v'", []).unwrap();
+        let s = test_settings();
         let (a, b) = std::thread::scope(|sc| {
-            let h1 = sc.spawn(|| ensure_playback_for(&db, &dir, &s, "v"));
-            let h2 = sc.spawn(|| ensure_playback_for(&db, &dir, &s, "v"));
+            let h1 = sc.spawn(|| ensure_playback_for(&db, &dir, &s, "hevc"));
+            let h2 = sc.spawn(|| ensure_playback_for(&db, &dir, &s, "hevc"));
             (h1.join().unwrap().unwrap(), h2.join().unwrap().unwrap())
         });
         assert_eq!(a.path, b.path);
         assert!(a.converted || b.converted);
         assert!(lock(&INFLIGHT).is_empty());
-        let stored: String = db.lock().unwrap().query_row("SELECT playback_path FROM assets WHERE id='v'", [], |r| r.get(0)).unwrap();
+        let stored: String = db.lock().unwrap().query_row("SELECT playback_path FROM assets WHERE id='hevc'", [], |r| r.get(0)).unwrap();
         assert_eq!(stored, "v.mp4");
         assert!(!needs_playback_transcode(Path::new(&a.path)).unwrap());
         // Already converted: immediate, not converted again.
-        assert!(!ensure_playback_for(&db, &dir, &s, "v").unwrap().converted);
+        assert!(!ensure_playback_for(&db, &dir, &s, "hevc").unwrap().converted);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn on_open_background_run_skips_transcodes_and_leaves_pending() {
         let Some((dir, db)) = video_fixture(&["-c:v", "mpeg4", "-pix_fmt", "yuv420p"], "mp4") else { return };
-        let s = PerformanceSettings { transcode_mode: TranscodeMode::OnOpen, ..Default::default() };
+        let s = PerformanceSettings { transcode_mode: TranscodeMode::OnOpen, ..test_settings() };
         let summary = process_pending_media(&db, &dir, &s, &Arc::new(MediaControl::default()), &|_, _, _| {}).unwrap();
         assert_eq!((summary.total, summary.playback_transcoded, summary.playback_failed), (0, 0, 0));
         let pb: Option<String> = db.lock().unwrap().query_row("SELECT playback_path FROM assets WHERE id='v'", [], |r| r.get(0)).unwrap();
@@ -1956,7 +1963,7 @@ mod tests {
             needs_thumbnail: false,
             needs_playback: true,
         };
-        let err = ensure_playback_copy(&asset, &PerformanceSettings::default(), false).unwrap_err();
+        let err = ensure_playback_copy(&asset, &test_settings(), false).unwrap_err();
         assert!(err.contains("source file missing"));
     }
 
@@ -2004,7 +2011,7 @@ mod tests {
         let Some((dir, db)) = video_fixture(&["-c:v", "libx264", "-pix_fmt", "yuv420p"], "mp4") else { return };
         // Own id: INFLIGHT is process-global and sibling tests use "v".
         db.lock().unwrap().execute("UPDATE assets SET id = 'safe' WHERE id = 'v'", []).unwrap();
-        ensure_playback_for(&db, &dir, &PerformanceSettings::default(), "safe").unwrap();
+        ensure_playback_for(&db, &dir, &test_settings(), "safe").unwrap();
         let pb: Option<String> = db.lock().unwrap().query_row("SELECT playback_path FROM assets WHERE id='safe'", [], |r| r.get(0)).unwrap();
         assert!(pb.is_some_and(|p| p.ends_with("v.mp4")));
         // Corrupt file: truncated garbage with an mp4 extension.
@@ -2012,7 +2019,7 @@ mod tests {
         db.lock().unwrap().execute(
             "INSERT INTO assets (id, media_type, original_path, thumbnail_path) VALUES ('bad', 'video', ?1, 't.webp')",
             [dir.join("bad.mp4").display().to_string()]).unwrap();
-        assert!(ensure_playback_for(&db, &dir, &PerformanceSettings::default(), "bad").is_err());
+        assert!(ensure_playback_for(&db, &dir, &test_settings(), "bad").is_err());
         let f: Option<i64> = db.lock().unwrap().query_row("SELECT playback_failed FROM assets WHERE id='bad'", [], |r| r.get(0)).unwrap();
         assert_eq!(f, Some(1));
         let _ = std::fs::remove_dir_all(&dir);
