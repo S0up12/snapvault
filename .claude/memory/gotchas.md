@@ -15,3 +15,4 @@
 - Extraction skips (counts as skipped) entries with backslash/drive letter/reserved Windows names/symlinks and duplicate names (create_new, first wins); caps 500k entries / 512 GiB real bytes; failed extraction deletes imports/<job>.
 - In-place HEVC transcode: ensure_playback_copy no longer deletes the old original on extension change; the caller removes it after the DB row is updated. Same-extension case is an atomic rename over the original (original HEVC is intentionally not kept).
 - reset_library/set_media_root take MediaSlot but ingestion only holds it in its media phase, not during zip extraction.
+- src/index.css @imports Google Fonts (remote); the prod CSP (font-src/style-src self) blocks it, so fonts must be bundled locally. opener scope is https/http `*` because Chats.tsx opens arbitrary chat URLs.

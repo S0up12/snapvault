@@ -1,4 +1,10 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2-variations");
+}
 @import "tailwindcss";
 
 /* Nocturne design tokens - a quiet, compact dark interface. Every color,
@@ -31,7 +37,7 @@
   --color-accent-800: #423a6a;
   --color-accent-900: #2b2741;
 
-  --font-sans: "Inter", system-ui, sans-serif;
+  --font-sans: "Inter Variable", "Inter", system-ui, sans-serif;
   --radius-lg: 0.875rem; /* 14px - Nocturne's card radius */
 }
 

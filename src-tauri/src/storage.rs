@@ -95,10 +95,60 @@ fn resolve_at(fixed_dir: &Path) -> Result<Resolution, String> {
 
 fn set_media_root_at(fixed_dir: &Path, chosen: Option<&Path>) -> Result<PathBuf, String> {
     let media_root = chosen.map(Path::to_path_buf).unwrap_or_else(|| fixed_dir.to_path_buf());
+    if chosen.is_some() {
+        validate_media_root(&media_root, &system_dirs(), &protected_exact_dirs())?;
+    }
     fs::create_dir_all(&media_root)
         .map_err(|err| format!("failed to create {}: {err}", media_root.display()))?;
+    if !media_root.is_dir() {
+        return Err(format!("{} is not a directory.", media_root.display()));
+    }
+    let probe = media_root.join(format!(".snapvault-write-test-{}", std::process::id()));
+    fs::write(&probe, b"x").map_err(|err| format!("{} is not writable: {err}", media_root.display()))?;
+    let _ = fs::remove_file(&probe);
     write_pointer(fixed_dir, &media_root)?;
     Ok(media_root)
+}
+
+/// Dirs that neither equal nor contain a valid media root (OS/system locations).
+fn system_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = ["SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "ProgramData"]
+        .iter()
+        .filter_map(|key| std::env::var_os(key).map(PathBuf::from))
+        .collect();
+    if cfg!(unix) {
+        dirs.extend(["/bin", "/boot", "/dev", "/etc", "/lib", "/proc", "/sbin", "/sys", "/usr", "/var", "/System", "/Library", "/Applications"].map(PathBuf::from));
+    }
+    dirs
+}
+
+/// Dirs that may not be used themselves but may contain a media root (e.g. the profile root).
+fn protected_exact_dirs() -> Vec<PathBuf> {
+    ["USERPROFILE", "HOME"].iter().filter_map(|key| std::env::var_os(key).map(PathBuf::from)).collect()
+}
+
+/// Pure path checks: absolute, not a filesystem root, not inside `system`, not equal to `exact`.
+fn validate_media_root(path: &Path, system: &[PathBuf], exact: &[PathBuf]) -> Result<(), String> {
+    if !path.is_absolute() {
+        return Err(format!("Storage location must be an absolute path: {}", path.display()));
+    }
+    if path.parent().is_none() {
+        return Err("Storage location cannot be a drive or filesystem root.".to_string());
+    }
+    // Plain-string `..` check; starts_with below is component-wise and would not resolve it.
+    if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err("Storage location cannot contain '..'.".to_string());
+    }
+    if system.iter().any(|dir| path.starts_with(dir)) {
+        return Err(format!("{} is a system folder; choose another location.", path.display()));
+    }
+    if exact.iter().any(|dir| path == dir.as_path()) {
+        return Err("Choose a subfolder, not your user profile folder itself.".to_string());
+    }
+    if path.exists() && !path.is_dir() {
+        return Err(format!("{} is not a directory.", path.display()));
+    }
+    Ok(())
 }
 
 pub(crate) fn fixed_app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -250,6 +300,24 @@ mod tests {
         let result = set_media_root_at(&fixed_dir, None).unwrap();
         assert_eq!(result, fixed_dir);
         assert_eq!(read_pointer(&fixed_dir).unwrap(), Some(fixed_dir.clone()));
+    }
+
+    #[test]
+    fn validate_media_root_rules() {
+        let base = tempdir();
+        let sys = vec![base.join("sys")];
+        let home = vec![base.clone()];
+        assert!(validate_media_root(&base.join("ok"), &sys, &[]).is_ok());
+        assert!(validate_media_root(Path::new("relative/dir"), &sys, &[]).is_err());
+        assert!(validate_media_root(&base.join("sys").join("sub"), &sys, &[]).is_err());
+        assert!(validate_media_root(&base, &sys, &home).is_err());
+        assert!(validate_media_root(&base.join("sub"), &sys, &home).is_ok());
+        assert!(validate_media_root(&base.join("a").join("..").join("sys"), &sys, &[]).is_err());
+        let file = base.join("f.txt");
+        fs::write(&file, b"x").unwrap();
+        assert!(validate_media_root(&file, &sys, &[]).is_err());
+        let root = base.ancestors().last().unwrap().to_path_buf();
+        assert!(validate_media_root(&root, &[], &[]).is_err());
     }
 
     #[test]
