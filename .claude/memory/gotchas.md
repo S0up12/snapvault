@@ -16,3 +16,4 @@
 - In-place HEVC transcode: ensure_playback_copy no longer deletes the old original on extension change; the caller removes it after the DB row is updated. Same-extension case is an atomic rename over the original (original HEVC is intentionally not kept).
 - reset_library/set_media_root take MediaSlot but ingestion only holds it in its media phase, not during zip extraction.
 - src/index.css @imports Google Fonts (remote); the prod CSP (font-src/style-src self) blocks it, so fonts must be bundled locally. opener scope is https/http `*` because Chats.tsx opens arbitrary chat URLs.
+- Logging macros live in `crate::log` (`crate::log::log_info!` etc.); they are not exported at crate root. Never log paths/filenames/user content. Migrations: SCHEMA_SQL is frozen v1; fresh DBs replay later migrations on top of it.

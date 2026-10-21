@@ -262,7 +262,7 @@ pub async fn run_ingestion(
 
     match &result {
         Ok(summary) => {
-            println!(
+            crate::log::log_info!(
                 "[ingestion:{job_id}] completed: extracted={} matched={} unmatched={} assets_inserted={}",
                 summary.extracted_entries, summary.matched, summary.unmatched_files, summary.assets_inserted
             );
@@ -275,7 +275,7 @@ pub async fn run_ingestion(
             );
         }
         Err(message) => {
-            eprintln!("[ingestion:{job_id}] failed: {message}");
+            crate::log::log_error!("[ingestion:{job_id}] failed: {message}");
             let _ = app.emit(
                 PROGRESS_EVENT,
                 ProgressPayload::Error {

@@ -115,7 +115,7 @@ pub(super) fn parse_memories_blocking(
         // every JSON entry that day agrees (date is already the day key).
         let mut day_location: Option<(f64, f64)> = None;
         if let (Some(items), None) = (day_items, paired) {
-            eprintln!(
+            crate::log::log_warn!(
                 "[ingestion] memories day {day_key}: {} JSON entries vs {} files, no per-file pairing (day-level data only)",
                 items.len(),
                 groups.len()

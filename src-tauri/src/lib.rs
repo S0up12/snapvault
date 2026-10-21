@@ -1,5 +1,6 @@
 mod chats;
 mod db;
+mod log;
 mod ingestion;
 mod library;
 mod maintenance;
@@ -13,6 +14,7 @@ use std::sync::Mutex;
 use chats::{list_chat_messages, list_chat_threads};
 use db::DbState;
 use ingestion::run_ingestion;
+use log::log_frontend;
 use library::{
     list_memory_assets, list_memory_tags, list_memory_years, memory_year_offset, set_asset_favorite, set_asset_tags,
 };
@@ -56,6 +58,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            if let Ok(dir) = app.path().app_data_dir() {
+                if let Err(err) = log::init(dir.join("logs")) {
+                    eprintln!("logging to file disabled: {err}");
+                }
+            }
+            log::log_info!("SnapVault starting");
             let conn = db::init(app.handle())?;
             app.manage(DbState(Mutex::new(conn)));
 
@@ -96,7 +104,8 @@ pub fn run() {
             set_performance_settings,
             get_viewer_settings,
             set_viewer_settings,
-            check_ffmpeg
+            check_ffmpeg,
+            log_frontend
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

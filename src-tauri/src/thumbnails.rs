@@ -258,7 +258,7 @@ fn process_one(asset: &PendingAsset, thumbnail_dir: &Path, settings: &Performanc
         match generate_one_thumbnail(asset, &output_path, settings) {
             Ok(()) => ops.push(Op::Thumb(output_path.display().to_string())),
             Err(err) => {
-                eprintln!("[thumbnails] failed for asset {}: {err}", asset.id);
+                crate::log::log_error!("[thumbnails] failed for asset {}: {err}", asset.id);
                 // Marked so startup auto-resume doesn't retry forever; manual
                 // generate_thumbnails clears the marker. A spawn failure
                 // (ffmpeg missing) isn't a per-asset failure.
@@ -275,7 +275,7 @@ fn process_one(asset: &PendingAsset, thumbnail_dir: &Path, settings: &Performanc
             }),
             Ok(None) => {} // already browser-safe
             Err(err) => {
-                eprintln!("[thumbnails] playback transcode failed for asset {}: {err}", asset.id);
+                crate::log::log_error!("[thumbnails] playback transcode failed for asset {}: {err}", asset.id);
                 ops.push(Op::PlaybackFailed);
             }
         }
@@ -438,7 +438,7 @@ pub async fn generate_thumbnails(app: AppHandle) -> Result<ThumbnailSummary, Str
 pub fn resume_pending_media_on_startup(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         if let Err(err) = run_and_emit(app, false).await {
-            eprintln!("[thumbnails] startup auto-resume failed: {err}");
+            crate::log::log_error!("[thumbnails] startup auto-resume failed: {err}");
         }
     });
 }
@@ -675,10 +675,9 @@ fn generate_one_thumbnail(asset: &PendingAsset, output_path: &Path, settings: &P
     if let Some(overlay) = overlay {
         match run_thumbnail_ffmpeg(&input, Some(overlay), output_path, settings) {
             Ok(()) => return Ok(()),
-            Err(err) => eprintln!(
-                "[thumbnails] WARN overlay composite failed for asset {} (overlay {}), retrying without overlay: {err}",
-                asset.id,
-                overlay.display()
+            Err(err) => crate::log::log_warn!(
+                "[thumbnails] overlay composite failed for asset {}, retrying without overlay: {err}",
+                asset.id
             ),
         }
     }
