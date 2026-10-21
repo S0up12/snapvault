@@ -33,6 +33,11 @@
     "publisher": "S0up12",
     "copyright": "Copyright © 2026 S0up12",
     "homepage": "https://github.com/S0up12/snapvault",
+    "category": "Photography",
+    "shortDescription": "Browse your exported Snapchat data offline",
+    "longDescription": "SnapVault is a self-hosted, offline-first desktop viewer for exported Snapchat data: memories, chats and profile. Everything stays on your device.",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

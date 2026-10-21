@@ -8,7 +8,7 @@
 /// - `onupdate=func.now()` -> an `AFTER UPDATE` trigger per table, since SQLite
 ///   has no column-level auto-update-on-write
 /// - `celery_task_id` on `ingestion_jobs` dropped: Celery is server infra this
-///   project explicitly excludes (see AGENT.md's architectural rules)
+///   project explicitly excludes (see CLAUDE.md's architectural rules)
 /// - the Postgres GIN index on `assets.tags` has no SQLite equivalent for a
 ///   JSON-in-TEXT column; deferred until tag search is actually implemented
 /// - `assets.latitude`/`longitude` have no equivalent in the old models at all:

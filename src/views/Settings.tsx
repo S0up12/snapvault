@@ -1,6 +1,7 @@
+import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { confirm } from "@tauri-apps/plugin-dialog";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   AlertCircle,
   AlertTriangle,
@@ -12,7 +13,7 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import Stat from "../components/Stat";
 import StorageChoiceModal from "../components/StorageChoiceModal";
@@ -30,13 +31,14 @@ type VerifySummary = {
   missing_playback: number;
 };
 
-type SectionKey = "library" | "storage" | "viewer" | "performance" | "danger";
+type SectionKey = "library" | "storage" | "viewer" | "performance" | "about" | "danger";
 
 const SECTIONS: { key: SectionKey; label: string }[] = [
   { key: "library", label: "Library" },
   { key: "storage", label: "Storage" },
   { key: "viewer", label: "Media viewer" },
   { key: "performance", label: "Performance" },
+  { key: "about", label: "About" },
   { key: "danger", label: "Danger zone" },
 ];
 
@@ -100,6 +102,7 @@ export default function Settings() {
               <ThumbnailGenerator />
             </>
           ) : null}
+          {section === "about" ? <AboutPanel /> : null}
           {section === "danger" ? <DangerZonePanel /> : null}
         </div>
       </div>
@@ -550,6 +553,30 @@ function VerifyLibraryPanel() {
           </div>
         </div>
       ) : null}
+    </Panel>
+  );
+}
+
+function AboutPanel() {
+  const [version, setVersion] = useState("");
+
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => setVersion(""));
+  }, []);
+
+  return (
+    <Panel kicker="About" title="SnapVault" description="A self-hosted, offline-first viewer for exported Snapchat data. Everything stays on your device.">
+      <SettingsRow label="Version" hint="Installed build">
+        <span className="text-sm text-neutral-300">{version || "-"}</span>
+      </SettingsRow>
+      <SettingsRow label="Author" hint="Built by S0up12">
+        <button type="button" onClick={() => openUrl("https://github.com/S0up12/snapvault")} className="btn">
+          GitHub
+        </button>
+      </SettingsRow>
+      <SettingsRow label="License" hint="Free and open source" last>
+        <span className="text-sm text-neutral-300">MIT</span>
+      </SettingsRow>
     </Panel>
   );
 }

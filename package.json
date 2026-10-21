@@ -2,6 +2,14 @@
   "name": "snapvault",
   "private": true,
   "version": "0.1.0",
+  "description": "SnapVault - a self-hosted, offline-first desktop viewer for exported Snapchat data",
+  "author": "S0up12",
+  "license": "MIT",
+  "homepage": "https://github.com/S0up12/snapvault",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/S0up12/snapvault.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

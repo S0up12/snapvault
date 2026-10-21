@@ -1,6 +1,6 @@
 # ============================================================
 # SnapVault .gitignore
-# Enforces the Security & Version Control rules in AGENT.md:
+# Enforces the Security & Version Control rules in CLAUDE.md:
 # no server data, no secrets, no user data, no build artifacts.
 # ============================================================
 
