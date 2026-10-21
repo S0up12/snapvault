@@ -24,7 +24,7 @@ type Migration = fn(&Connection, &Path) -> rusqlite::Result<()>;
 /// v1 baseline, and fresh databases replay every later migration on top of it.
 /// Plain DDL (ALTER TABLE, CREATE INDEX, table rebuild for CHECK/type changes)
 /// is fine; avoid `PRAGMA`s that cannot run inside a transaction.
-pub(crate) const MIGRATIONS: &[Migration] = &[migrate_v1_baseline, migrate_v2_relative_paths, migrate_v3_playback_failed];
+pub(crate) const MIGRATIONS: &[Migration] = &[migrate_v1_baseline, migrate_v2_relative_paths, migrate_v3_playback_failed, migrate_v4_chat_fts];
 
 /// v1 baseline = schema.rs + every column that used to be added ad hoc + the
 /// is_sender backfill. Idempotent, so it is also correct for legacy databases
@@ -64,6 +64,36 @@ fn migrate_v2_relative_paths(conn: &Connection, root: &Path) -> rusqlite::Result
 /// v3: marks videos whose probe/transcode failed definitively so they stop being retried.
 fn migrate_v3_playback_failed(conn: &Connection, _root: &Path) -> rusqlite::Result<()> {
     add_column_if_missing(conn, "assets", "playback_failed", "INTEGER")
+}
+
+/// v4: FTS5 external-content index over `chat_messages.body` (rowid-keyed;
+/// chat_messages is a normal rowid table). Only non-empty bodies are indexed;
+/// the triggers use INSERT..SELECT..WHERE so the 'delete' command is never
+/// issued for a row that was not indexed (that would corrupt the index). The
+/// update trigger is `OF body` so the updated_at trigger's own UPDATE does not
+/// re-fire it, and uses one trigger so delete-then-insert order is guaranteed.
+fn migrate_v4_chat_fts(conn: &Connection, _root: &Path) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE chat_messages_fts USING fts5(
+            body, content='chat_messages', content_rowid='rowid',
+            tokenize='unicode61 remove_diacritics 2');
+         CREATE TRIGGER trg_chat_messages_fts_ai AFTER INSERT ON chat_messages BEGIN
+            INSERT INTO chat_messages_fts(rowid, body) SELECT new.rowid, new.body
+            WHERE new.body IS NOT NULL AND new.body <> '';
+         END;
+         CREATE TRIGGER trg_chat_messages_fts_ad AFTER DELETE ON chat_messages BEGIN
+            INSERT INTO chat_messages_fts(chat_messages_fts, rowid, body) SELECT 'delete', old.rowid, old.body
+            WHERE old.body IS NOT NULL AND old.body <> '';
+         END;
+         CREATE TRIGGER trg_chat_messages_fts_au AFTER UPDATE OF body ON chat_messages BEGIN
+            INSERT INTO chat_messages_fts(chat_messages_fts, rowid, body) SELECT 'delete', old.rowid, old.body
+            WHERE old.body IS NOT NULL AND old.body <> '';
+            INSERT INTO chat_messages_fts(rowid, body) SELECT new.rowid, new.body
+            WHERE new.body IS NOT NULL AND new.body <> '';
+         END;
+         INSERT INTO chat_messages_fts(rowid, body)
+            SELECT rowid, body FROM chat_messages WHERE body IS NOT NULL AND body <> '';",
+    )
 }
 
 /// Applies pending migrations, each in its own transaction with its version bump.
@@ -152,7 +182,7 @@ mod tests {
     }
 
     fn tables(conn: &Connection) -> Vec<String> {
-        conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'chat_messages_fts%' ORDER BY name")
             .unwrap()
             .query_map([], |r| r.get(0))
             .unwrap()
@@ -216,7 +246,7 @@ mod tests {
         conn.execute("INSERT INTO assets (id, media_type, original_path) VALUES ('a', 'video', 'p')", []).unwrap();
         assert!(conn.prepare("SELECT playback_failed FROM assets").is_err());
         migrate(&conn, MIGRATIONS, Path::new("/none")).unwrap();
-        assert_eq!(version(&conn), 3);
+        assert_eq!(version(&conn), MIGRATIONS.len() as i64);
         let v: Option<i64> = conn.query_row("SELECT playback_failed FROM assets WHERE id='a'", [], |r| r.get(0)).unwrap();
         assert_eq!(v, None);
     }
@@ -315,5 +345,29 @@ mod tests {
             .prepare("SELECT is_sender FROM chat_messages ORDER BY id").unwrap()
             .query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
         assert_eq!(got, vec![Some(1), Some(0), None, None]);
+    }
+
+    #[test]
+    fn v4_backfills_fts_from_a_v3_db_and_skips_empty_bodies() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn, &MIGRATIONS[..3], Path::new("/none")).unwrap();
+        conn.execute("INSERT INTO chat_threads (id, external_id) VALUES ('t', 'e')", []).unwrap();
+        for (id, body) in [("v4a", Some("hello world")), ("v4b", Some("")), ("v4c", None), ("v4d", Some("goodbye"))] {
+            conn.execute(
+                "INSERT INTO chat_messages (id, thread_id, sender, body, sent_at, dedupe_key) VALUES (?1, 't', 's', ?2, 'x', ?1)",
+                rusqlite::params![id, body],
+            )
+            .unwrap();
+        }
+        assert!(conn.prepare("SELECT 1 FROM chat_messages_fts").is_err());
+        migrate(&conn, MIGRATIONS, Path::new("/none")).unwrap();
+        assert_eq!(version(&conn), 4);
+        let hits = |q: &str| -> i64 {
+            conn.query_row("SELECT COUNT(*) FROM chat_messages_fts WHERE chat_messages_fts MATCH ?1", [q], |r| r.get(0)).unwrap()
+        };
+        assert_eq!((hits("hello"), hits("goodbye")), (1, 1));
+        let docs: i64 = conn.query_row("SELECT COUNT(*) FROM chat_messages_fts_docsize", [], |r| r.get(0)).unwrap();
+        assert_eq!(docs, 2);
+        conn.execute_batch("INSERT INTO chat_messages_fts(chat_messages_fts) VALUES('integrity-check')").unwrap();
     }
 }

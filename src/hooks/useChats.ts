@@ -46,15 +46,26 @@ export function useChatThreads() {
   return { threads, isLoading, error };
 }
 
-type ChatMessagePage = { messages: ChatMessage[]; has_more: boolean; next_before: string | null };
+type ChatMessagePage = {
+  messages: ChatMessage[];
+  has_more: boolean;
+  next_before: string | null;
+  has_more_after?: boolean;
+  next_after?: string | null;
+};
 
-export function useChatMessages(threadId: string | null) {
+// aroundId: load a window centered on that message instead of the newest page.
+// The caller remounts (key) to re-run a jump; the effect also re-runs on change.
+export function useChatMessages(threadId: string | null, aroundId: string | null = null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [hasMore, setHasMore] = useState(false);
+  const [hasMoreAfter, setHasMoreAfter] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const [isLoadingNewer, setIsLoadingNewer] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nextBefore = useRef<string | null>(null);
+  const nextAfter = useRef<string | null>(null);
   // Bumped on every thread change; responses from an older generation are dropped.
   const generation = useRef(0);
   const busy = useRef(false);
@@ -64,24 +75,29 @@ export function useChatMessages(threadId: string | null) {
     busy.current = false;
     setMessages([]);
     setHasMore(false);
+    setHasMoreAfter(false);
     setIsLoadingOlder(false);
+    setIsLoadingNewer(false);
     setError(null);
     nextBefore.current = null;
+    nextAfter.current = null;
     if (!threadId) {
       setIsLoading(false);
       return;
     }
     setIsLoading(true);
-    invokeLogged<ChatMessagePage>("list_chat_messages", { threadId })
+    invokeLogged<ChatMessagePage>("list_chat_messages", aroundId ? { threadId, around: aroundId } : { threadId })
       .then((page) => {
         if (gen !== generation.current) return;
         setMessages(page.messages);
         setHasMore(page.has_more);
+        setHasMoreAfter(page.has_more_after ?? false);
         nextBefore.current = page.next_before;
+        nextAfter.current = page.next_after ?? null;
       })
       .catch((err) => gen === generation.current && setError(String(err)))
       .finally(() => gen === generation.current && setIsLoading(false));
-  }, [threadId]);
+  }, [threadId, aroundId]);
 
   const loadOlder = useCallback(async () => {
     if (!threadId || busy.current || !nextBefore.current) return;
@@ -110,7 +126,34 @@ export function useChatMessages(threadId: string | null) {
     }
   }, [threadId]);
 
-  return { messages, isLoading, isLoadingOlder, error, hasMore, loadOlder };
+  const loadNewer = useCallback(async () => {
+    if (!threadId || busy.current || !nextAfter.current) return;
+    const gen = generation.current;
+    busy.current = true;
+    setIsLoadingNewer(true);
+    try {
+      const page = await invokeLogged<ChatMessagePage>("list_chat_messages", {
+        threadId,
+        after: nextAfter.current,
+      });
+      if (gen !== generation.current) return;
+      setMessages((prev) => {
+        const seen = new Set(prev.map((m) => m.id));
+        return [...prev, ...page.messages.filter((m) => !seen.has(m.id))];
+      });
+      setHasMoreAfter(page.has_more_after ?? false);
+      nextAfter.current = page.next_after ?? null;
+    } catch (err) {
+      if (gen === generation.current) setError(String(err));
+    } finally {
+      if (gen === generation.current) {
+        busy.current = false;
+        setIsLoadingNewer(false);
+      }
+    }
+  }, [threadId]);
+
+  return { messages, isLoading, isLoadingOlder, isLoadingNewer, error, hasMore, hasMoreAfter, loadOlder, loadNewer };
 }
 
 // Avatar initials from a display name, mirroring the reference app's

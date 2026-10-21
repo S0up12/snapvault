@@ -1,6 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Clapperboard, LoaderCircle, Play, Search, Users } from "lucide-react";
+import { Clapperboard, LoaderCircle, Play, Search, Users, X } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
@@ -17,6 +17,7 @@ import {
   type ChatMessageMedia,
   type ChatThread,
 } from "../hooks/useChats";
+import { useChatSearch, type ChatSearchHit } from "../hooks/useChatSearch";
 import { formatDayGroup } from "../hooks/useMemories";
 
 function formatMessageTime(sentAt: string): string {
@@ -70,11 +71,27 @@ function Linkified({ text }: { text: string }) {
   return <>{nodes}</>;
 }
 
+// Snippet match markers: U+0001 starts and U+0002 ends a match, so splitting on
+// either yields alternating plain / matched pieces.
+function Snippet({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/[\u0001\u0002]/).map((part, i) => (i % 2 === 1 ? <mark key={i}>{part}</mark> : part))}
+    </>
+  );
+}
+
+type Jump = { id: string; n: number };
+
 export default function Chats() {
   const { chatsFilters } = useOutletContext<LayoutOutletContext>();
   const { threads, isLoading, error } = useChatThreads();
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [jump, setJump] = useState<Jump | null>(null);
+  const [thisChatOnly, setThisChatOnly] = useState(false);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const search = useChatSearch(thisChatOnly ? selectedThreadId : null);
   const selectedThread = threads.find((t) => t.id === selectedThreadId) ?? null;
 
   const filteredThreads = useMemo(
@@ -90,6 +107,21 @@ export default function Chats() {
   );
 
   useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const el = event.target as HTMLElement | null;
+      const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+      const isCtrlK = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k";
+      if (isCtrlK || (event.key === "/" && !typing)) {
+        event.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => {
     if (!selectedThreadId && threads.length > 0) {
       setSelectedThreadId(threads[0].id);
     }
@@ -98,6 +130,46 @@ export default function Chats() {
   return (
     <section className="flex h-full min-h-0 w-full overflow-hidden rounded-lg ring-1 ring-divider">
       <div className="flex w-[320px] min-w-[220px] shrink-0 flex-col border-r border-divider p-3.5">
+        <div className="relative mb-2.5">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-500" />
+          <input
+            ref={searchRef}
+            type="text"
+            value={search.query}
+            onChange={(event) => search.setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") search.setQuery("");
+            }}
+            placeholder="Search messages"
+            className="input h-9 px-9 text-[13px]"
+          />
+          {search.query ? (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => search.setQuery("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </div>
+        {selectedThread ? (
+          <label className="mb-2.5 flex items-center gap-2 text-xs text-neutral-400">
+            <input type="checkbox" checked={thisChatOnly} onChange={(event) => setThisChatOnly(event.target.checked)} />
+            This chat only
+          </label>
+        ) : null}
+        {search.active ? (
+          <SearchResults
+            search={search}
+            onOpen={(hit) => {
+              setSelectedThreadId(hit.thread_id);
+              setJump((j) => ({ id: hit.message_id, n: (j?.n ?? 0) + 1 }));
+            }}
+          />
+        ) : (
+        <>
         <div className="relative mb-2.5">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-500" />
           <input
@@ -123,16 +195,26 @@ export default function Chats() {
                 key={thread.id}
                 thread={thread}
                 isSelected={thread.id === selectedThreadId}
-                onSelect={() => setSelectedThreadId(thread.id)}
+                onSelect={() => {
+                  setSelectedThreadId(thread.id);
+                  setJump(null);
+                }}
               />
             ))
           )}
         </div>
+        </>
+        )}
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
         {selectedThread ? (
-          <MessagePane key={selectedThread.id} thread={selectedThread} />
+          <MessagePane
+            key={`${selectedThread.id}:${jump?.n ?? 0}`}
+            thread={selectedThread}
+            jumpId={jump?.id ?? null}
+            onJumpLatest={() => setJump(null)}
+          />
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-neutral-500">
             Select a conversation.
@@ -140,6 +222,68 @@ export default function Chats() {
         )}
       </div>
     </section>
+  );
+}
+
+function SearchResults({
+  search,
+  onOpen,
+}: {
+  search: ReturnType<typeof useChatSearch>;
+  onOpen: (hit: ChatSearchHit) => void;
+}) {
+  const { hits, total, totalCapped, hasMore, isLoading, error, loadMore } = search;
+  return (
+    <div className="flex flex-col gap-0.5 overflow-y-auto">
+      {error ? (
+        <div className="rounded-md bg-red-500/8 px-3 py-2 text-xs text-red-300 ring-1 ring-red-400/25">{error}</div>
+      ) : null}
+      {hits.length > 0 ? (
+        <p className="px-1 pb-1 text-[11px] text-neutral-500">
+          {total.toLocaleString()}
+          {totalCapped ? "+" : ""} {total === 1 && !totalCapped ? "result" : "results"}
+        </p>
+      ) : null}
+      {hits.map((hit) => {
+        const title = hit.thread_title ?? "Unknown";
+        return (
+          <button
+            key={hit.message_id}
+            type="button"
+            onClick={() => onOpen(hit)}
+            className="flex w-full items-start gap-3 rounded-[10px] px-3 py-2.5 text-left transition hover:bg-white/[0.03]"
+          >
+            <div
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold text-white"
+              style={{ background: avatarGradient(hit.thread_id) }}
+            >
+              {avatarInitials(title)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-sm text-neutral-300">{title}</p>
+                <span className="shrink-0 text-[11px] text-neutral-500">{formatDayGroup(hit.sent_at).shortLabel}</span>
+              </div>
+              <p className="text-[11px] text-neutral-500">{hit.sender_label}</p>
+              <p className="line-clamp-2 text-xs text-neutral-400">
+                <Snippet text={hit.snippet} />
+              </p>
+            </div>
+          </button>
+        );
+      })}
+      {isLoading ? (
+        <div className="flex justify-center py-4 text-neutral-500">
+          <LoaderCircle className="h-4 w-4 animate-spin" />
+        </div>
+      ) : null}
+      {!isLoading && !error && hits.length === 0 ? <p className="p-3 text-sm text-neutral-500">No messages match</p> : null}
+      {hasMore && !isLoading ? (
+        <button type="button" onClick={() => void loadMore()} className="p-2 text-xs text-accent-300 hover:underline">
+          Show more
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -187,8 +331,18 @@ function ConversationRow({
   );
 }
 
-function MessagePane({ thread }: { thread: ChatThread }) {
-  const { messages, isLoading, isLoadingOlder, error, hasMore, loadOlder } = useChatMessages(thread.id);
+function MessagePane({
+  thread,
+  jumpId,
+  onJumpLatest,
+}: {
+  thread: ChatThread;
+  jumpId: string | null;
+  onJumpLatest: () => void;
+}) {
+  const { messages, isLoading, isLoadingOlder, isLoadingNewer, error, hasMore, hasMoreAfter, loadOlder, loadNewer } =
+    useChatMessages(thread.id, jumpId);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [openMediaId, setOpenMediaId] = useState<string | null>(null);
 
@@ -222,6 +376,7 @@ function MessagePane({ thread }: { thread: ChatThread }) {
   });
   const virtualItems = virtualizer.getVirtualItems();
   const firstVisible = virtualItems[0]?.index ?? 0;
+  const lastVisible = virtualItems[virtualItems.length - 1]?.index ?? 0;
 
   const prev = useRef({ firstId: "", count: 0 });
   const didInitialScroll = useRef(false);
@@ -230,7 +385,7 @@ function MessagePane({ thread }: { thread: ChatThread }) {
 
   // Re-issues a scrollToIndex every frame for up to ~1s (or until the user
   // takes over) so it converges as rows get measured and estimates shrink/grow.
-  const pinScroll = (index: number, align: "start" | "end", onDone?: () => void) => {
+  const pinScroll = (index: number, align: "start" | "end" | "center", onDone?: () => void) => {
     cancelAnimationFrame(rafId.current);
     const el = scrollRef.current;
     const t0 = performance.now();
@@ -263,7 +418,16 @@ function MessagePane({ thread }: { thread: ChatThread }) {
     if (messages.length > 0) {
       if (!didInitialScroll.current) {
         didInitialScroll.current = true;
-        pinScroll(messages.length - 1, "end", () => setReady(true));
+        const target = jumpId ? messages.findIndex((m) => m.id === jumpId) : -1;
+        if (target >= 0) {
+          // Jump mode: center the target, no pin-to-bottom, then flash it.
+          pinScroll(target, "center", () => {
+            setReady(true);
+            setHighlightId(jumpId);
+          });
+        } else {
+          pinScroll(messages.length - 1, "end", () => setReady(true));
+        }
       } else if (messages[0].id !== p.firstId && p.count > 0 && messages.length > p.count) {
         // Older page prepended: anchor on the message that was first before.
         pinScroll(messages.length - p.count, "start");
@@ -274,6 +438,18 @@ function MessagePane({ thread }: { thread: ChatThread }) {
   }, [messages]);
 
   useEffect(() => () => cancelAnimationFrame(rafId.current), []);
+
+  useEffect(() => {
+    if (!highlightId) return;
+    const timer = setTimeout(() => setHighlightId(null), 2000);
+    return () => clearTimeout(timer);
+  }, [highlightId]);
+
+  useEffect(() => {
+    if (ready && hasMoreAfter && !isLoadingNewer && lastVisible >= messages.length - 5) {
+      void loadNewer();
+    }
+  }, [ready, lastVisible, hasMoreAfter, isLoadingNewer, loadNewer, messages.length]);
 
   useEffect(() => {
     if (ready && hasMore && !isLoadingOlder && firstVisible < 5) {
@@ -298,6 +474,14 @@ function MessagePane({ thread }: { thread: ChatThread }) {
         </div>
       </div>
 
+      {hasMoreAfter ? (
+        <div className="flex justify-center border-b border-divider py-1.5">
+          <button type="button" onClick={onJumpLatest} className="text-xs text-accent-300 hover:underline">
+            Jump to latest
+          </button>
+        </div>
+      ) : null}
+
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-5">
         {isLoading ? (
           <div className="flex h-full items-center justify-center text-neutral-500">
@@ -320,7 +504,7 @@ function MessagePane({ thread }: { thread: ChatThread }) {
                   key={item.key}
                   data-index={item.index}
                   ref={virtualizer.measureElement}
-                  className="absolute left-0 top-0 w-full pb-4.5"
+                  className={["absolute left-0 top-0 w-full pb-4.5", messages[item.index].id === highlightId ? "chat-highlight" : ""].join(" ")}
                   style={{ transform: `translateY(${item.start}px)` }}
                 >
                   <MessageBubble message={messages[item.index]} isGroup={thread.is_group} onOpenMedia={setOpenMediaId} />

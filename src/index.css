@@ -270,3 +270,15 @@ body {
     transform: translateX(100%);
   }
 }
+
+@keyframes chat-highlight-fade {
+  from { background-color: rgb(255 255 255 / 0.14); }
+  to { background-color: transparent; }
+}
+.chat-highlight {
+  background-color: rgb(255 255 255 / 0.14);
+  animation: chat-highlight-fade 2s ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-highlight { animation: none; }
+}

@@ -5,6 +5,7 @@ All notable changes to SnapVault. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Added
+- Chat search: full-text search (SQLite FTS5) across all messages with highlighted snippets, optional per-chat scope, and jump-to-message with loading in both directions. Shortcuts: `/` and Ctrl+K.
 - Bundled ffmpeg/ffprobe in the installer (NSIS), with third-party notices; system ffmpeg remains the fallback.
 - Media processing control: pause, resume and cancel; hardware-accelerated video conversion (auto-detected, tested before use); convert-on-open mode.
 - Versioned database migrations (`PRAGMA user_version`) and a file logger with path redaction.

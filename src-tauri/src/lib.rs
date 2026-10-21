@@ -11,7 +11,7 @@ mod thumbnails;
 
 use std::sync::Mutex;
 
-use chats::{list_chat_messages, list_chat_threads};
+use chats::{list_chat_messages, list_chat_threads, search_chat_messages};
 use db::DbState;
 use ingestion::run_ingestion;
 use log::log_frontend;
@@ -94,6 +94,7 @@ pub fn run() {
             set_asset_tags,
             list_chat_threads,
             list_chat_messages,
+            search_chat_messages,
             get_profile_snapshot,
             get_library_stats,
             verify_library,
