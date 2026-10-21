@@ -85,6 +85,12 @@ pub(super) fn parse_memories_blocking(
     // regardless of how many memories there are.
     let emit_step = (total_files / 100).max(1);
 
+    // One transaction for the phase: a single fsync, and any `?` below drops
+    // `tx` (rollback) so a failed phase leaves no partial rows.
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|err| format!("failed to begin transaction: {err}"))?;
+    let conn = &*tx;
     let collection_id = ensure_memory_collection(conn)?;
 
     let mut matched = 0usize;
@@ -177,6 +183,8 @@ pub(super) fn parse_memories_blocking(
         }
     }
 
+    tx.commit()
+        .map_err(|err| format!("failed to commit memories: {err}"))?;
     Ok(ParseMemoriesSummary {
         json_items: total_json_items,
         files_found: total_files,

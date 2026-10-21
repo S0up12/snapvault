@@ -5,6 +5,8 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use tauri::{AppHandle, Manager};
 
+pub(crate) const PRAGMAS: &str = "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;";
+
 pub struct DbState(pub Mutex<Connection>);
 
 /// Opens (creating if needed) the app's SQLite database in the OS-specific
@@ -25,7 +27,7 @@ pub fn init(app_handle: &AppHandle) -> Result<Connection, String> {
     let conn = Connection::open(&db_path)
         .map_err(|err| format!("failed to open database at {}: {err}", db_path.display()))?;
 
-    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")
+    conn.execute_batch(PRAGMAS)
         .map_err(|err| format!("failed to configure database connection: {err}"))?;
     conn.execute_batch(schema::SCHEMA_SQL)
         .map_err(|err| format!("failed to apply database schema: {err}"))?;

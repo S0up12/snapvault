@@ -716,6 +716,43 @@ mod tests {
         assert!(!dest.exists());
     }
 
+    /// Timing check (run with --nocapture): 5k memories + 20k messages on a
+    /// temp-file WAL db. Also asserts a failed phase leaves no partial rows.
+    #[test]
+    fn bench_parse_insert_phase() {
+        let job = tempdir();
+        let part = job.join("part-000");
+        fs::create_dir_all(part.join("memories")).unwrap();
+        fs::create_dir_all(part.join("json")).unwrap();
+        let mut saved = Vec::new();
+        for i in 0..5000 {
+            let (day, sec) = (1 + i / 200, i % 200);
+            fs::write(part.join("memories").join(format!("2020-01-{day:02}_m{i}-main.jpg")), b"x").unwrap();
+            saved.push(serde_json::json!({"Date": format!("2020-01-{day:02} 10:{:02}:{:02} UTC", sec / 60, sec % 60), "Media Type": "Image", "Location": "Latitude, Longitude: 51.5, 5.3", "n": i}));
+        }
+        fs::write(part.join("json/memories_history.json"), serde_json::json!({ "Saved Media": saved }).to_string()).unwrap();
+        let mut chats = serde_json::Map::new();
+        for c in 0..20 {
+            let msgs: Vec<_> = (0..1000)
+                .map(|m| serde_json::json!({"From": "f", "Media Type": "TEXT", "Created": format!("2020-01-01 {:02}:{:02}:{:02} UTC", m / 3600, m / 60 % 60, m % 60), "Content": "hi", "Created(microseconds)": m, "Media IDs": ""}))
+                .collect();
+            chats.insert(format!("chat{c}"), msgs.into());
+        }
+        fs::write(part.join("json/chat_history.json"), serde_json::Value::Object(chats).to_string()).unwrap();
+
+        let conn = rusqlite::Connection::open(job.join("t.db")).unwrap();
+        conn.execute_batch(crate::db::PRAGMAS).unwrap();
+        conn.execute_batch(crate::db::schema::SCHEMA_SQL).unwrap();
+        let t = std::time::Instant::now();
+        let m = memories::parse_memories_blocking(&conn, &job, &|_, _, _| {}).unwrap();
+        let t_mem = t.elapsed();
+        let t = std::time::Instant::now();
+        let c = chats::parse_chats_blocking(&conn, &job, &|_, _, _| {}).unwrap();
+        println!("BENCH memories={} in {t_mem:?}; chats={} in {:?}", m.memory_items_inserted, c.messages_inserted, t.elapsed());
+        assert_eq!(m.assets_inserted, 5000);
+        assert_eq!(c.messages_inserted, 20000);
+    }
+
     fn tempdir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("snapvault-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();

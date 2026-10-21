@@ -52,6 +52,11 @@ pub(super) fn parse_chats_blocking(
     );
     let emit_step = (total_messages / 100).max(1);
 
+    // One transaction for the phase; an early `?` drops `tx` and rolls back.
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|err| format!("failed to begin transaction: {err}"))?;
+    let conn = &*tx;
     let mut threads_inserted = 0usize;
     let mut messages_inserted = 0usize;
     let mut media_assets_linked = 0usize;
@@ -154,6 +159,8 @@ pub(super) fn parse_chats_blocking(
         }
     }
 
+    tx.commit()
+        .map_err(|err| format!("failed to commit chats: {err}"))?;
     Ok(ParseChatsSummary {
         threads_found: conversations.len(),
         threads_inserted,
