@@ -23,7 +23,7 @@ use profile::get_profile_snapshot;
 use settings::{get_performance_settings, get_viewer_settings, set_performance_settings, set_viewer_settings};
 use storage::{get_storage_info, set_media_root};
 use tauri::Manager;
-use thumbnails::{check_ffmpeg, generate_thumbnails, get_media_activity, resume_pending_media_on_startup, MediaProcessingState};
+use thumbnails::{cancel_media_processing, detect_hw_encoders, ensure_playback, check_ffmpeg, generate_thumbnails, get_media_activity, get_media_state, pause_media_processing, resume_media_processing, resume_pending_media_on_startup, MediaProcessingState};
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -106,6 +106,12 @@ pub fn run() {
             set_viewer_settings,
             check_ffmpeg,
             get_media_activity,
+            get_media_state,
+            detect_hw_encoders,
+            ensure_playback,
+            pause_media_processing,
+            resume_media_processing,
+            cancel_media_processing,
             log_frontend
         ])
         .run(tauri::generate_context!())

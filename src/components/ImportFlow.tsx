@@ -3,10 +3,11 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { AlertCircle, CheckCircle2, Circle, FolderOpen, Loader2 } from "lucide-react";
 import { useState } from "react";
 
+import MediaJobControls from "./MediaJobControls";
 import Stat from "./Stat";
 import StorageChoiceModal from "./StorageChoiceModal";
 import type { StorageInfo } from "../hooks/useStorageSettings";
-import { startIngestion, useIngestionJob, type Phase } from "../lib/jobStore";
+import { startIngestion, useIngestionJob, useThumbnailJob, type Phase } from "../lib/jobStore";
 
 const STEPS: { key: Phase; label: string }[] = [
   { key: "extracting", label: "Extracting files" },
@@ -17,8 +18,9 @@ const STEPS: { key: Phase; label: string }[] = [
 ];
 
 export default function ImportFlow() {
-  const { status, activePhase, phaseMessage, phasePercent, donePhases, summary, error, backendBusy } =
+  const { status, activePhase, phaseMessage, phasePercent, donePhases, summary, error, backendBusy, mediaState } =
     useIngestionJob();
+  const media = useThumbnailJob();
   const [storageChoice, setStorageChoice] = useState<{ defaultPath: string } | null>(null);
   const busy = status === "running" || backendBusy;
 
@@ -71,6 +73,13 @@ export default function ImportFlow() {
 
       {backendBusy && status !== "running" ? (
         <p className="mt-3 text-xs text-neutral-400">Media processing is running in the background</p>
+      ) : null}
+
+      <MediaJobControls mediaState={mediaState} />
+      {media.status === "cancelled" && mediaState === "idle" ? (
+        <p className="mt-3 text-xs text-neutral-400">
+          Media processing cancelled - {media.summary ? media.summary.generated + media.summary.failed : media.processed} processed, remaining stay queued
+        </p>
       ) : null}
 
       {status === "running" || status === "completed" || status === "error" ? (

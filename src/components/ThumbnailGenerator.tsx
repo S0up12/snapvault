@@ -1,11 +1,14 @@
 import { AlertCircle, CheckCircle2, ImageIcon, Loader2 } from "lucide-react";
 
+import MediaJobControls from "./MediaJobControls";
 import Stat from "./Stat";
 import { startThumbnails, useThumbnailJob } from "../lib/jobStore";
 
 export default function ThumbnailGenerator() {
-  const { status, message, percent, summary, error, backendBusy } = useThumbnailJob();
-  const busy = status === "running" || backendBusy;
+  const { status, message, percent, processed, total, summary, error, backendBusy, mediaState } =
+    useThumbnailJob();
+  const active = status === "running" || status === "paused";
+  const busy = active || backendBusy;
 
   return (
     <div className="rounded-lg bg-surface p-6 ring-1 ring-divider">
@@ -30,16 +33,22 @@ export default function ThumbnailGenerator() {
         {status === "running" ? "Processing..." : "Reprocess media"}
       </button>
 
-      {backendBusy && status !== "running" ? (
+      {backendBusy && !active ? (
         <p className="mt-3 text-xs text-neutral-400">Media processing is running in the background</p>
       ) : null}
 
-      {status === "running" ? (
+      <MediaJobControls mediaState={mediaState} />
+
+      {active ? (
         <div className="mt-5">
           <div className="h-[5px] w-full overflow-hidden rounded-full bg-neutral-800">
             <div className="h-full rounded-full bg-accent transition-[width] duration-200" style={{ width: `${percent}%` }} />
           </div>
-          <p className="mt-1.5 truncate text-xs text-neutral-400">{message}</p>
+          <p className="mt-1.5 truncate text-xs text-neutral-400">
+            {status === "paused" ? "Paused - " : ""}
+            {total > 0 ? `${processed} / ${total} ` : ""}
+            {message}
+          </p>
         </div>
       ) : null}
 
@@ -51,6 +60,12 @@ export default function ThumbnailGenerator() {
           </div>
           <p className="mt-1.5 text-xs text-red-400">{error}</p>
         </div>
+      ) : null}
+
+      {status === "cancelled" ? (
+        <p className="mt-5 text-sm text-neutral-300">
+          Cancelled - {summary ? summary.generated + summary.failed : processed} processed, remaining stay queued
+        </p>
       ) : null}
 
       {status === "completed" && summary ? (

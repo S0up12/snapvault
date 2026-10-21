@@ -96,6 +96,9 @@ pub struct IngestionSummary {
     pub thumbnails_failed: usize,
     pub playback_transcoded: usize,
     pub playback_failed: usize,
+    /// Media phase was cancelled; remaining media stays pending.
+    #[serde(default)]
+    pub media_cancelled: bool,
 }
 
 /// Media root for a job dir, which is always `<root>/imports/<job>`.
@@ -235,7 +238,13 @@ pub async fn run_ingestion(
             let _slot = acquire_media_processing_slot(&app_for_blocking)?;
             let performance_settings = crate::settings::get_performance_settings(app_for_blocking.clone());
             let media_summary = performance_settings.and_then(|settings| {
-                process_pending_media(&state.0, &media_root_for_blocking, &settings, &emit_media)
+                process_pending_media(
+                    &state.0,
+                    &media_root_for_blocking,
+                    &settings,
+                    &crate::thumbnails::media_ctl(&app_for_blocking),
+                    &emit_media,
+                )
             });
             let media_summary = media_summary?;
 
@@ -259,6 +268,7 @@ pub async fn run_ingestion(
                 thumbnails_failed: media_summary.failed,
                 playback_transcoded: media_summary.playback_transcoded,
                 playback_failed: media_summary.playback_failed,
+                media_cancelled: media_summary.cancelled,
             })
         },
     )

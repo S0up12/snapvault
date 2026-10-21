@@ -1,9 +1,10 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { ChevronLeft, ChevronRight, Star, Tags, X } from "lucide-react";
+import { AlertCircle, ChevronLeft, ChevronRight, Loader2, Star, Tags, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { formatDayGroup } from "../hooks/useMemories";
 import { useDialogFocus } from "../hooks/useDialogFocus";
+import { useEnsurePlayback } from "../hooks/useEnsurePlayback";
 import { useViewerSettings } from "../hooks/useViewerSettings";
 
 // Trackpads/mice fire many small wheel events per physical swipe - this
@@ -85,6 +86,9 @@ export default function Lightbox<T extends LightboxAsset>({
   const scrollNavigationEnabled = viewerSettings?.vertical_scroll_navigation ?? true;
   const autoplayDelayMs = viewerSettings?.autoplay_delay_ms ?? 0;
 
+  const needsPlayback = asset?.media_type === "video" && !asset.playback_path;
+  const playback = useEnsurePlayback(needsPlayback ? asset.id : null);
+
   const [navDirection, setNavDirection] = useState<NavDirection | null>(null);
   const [outgoing, setOutgoing] = useState<{ asset: T; mediaBox: MediaBox; direction: NavDirection } | null>(null);
   const navLockRef = useRef(false);
@@ -132,7 +136,7 @@ export default function Lightbox<T extends LightboxAsset>({
       el.play().catch(() => {});
     }, autoplayDelayMs);
     return () => window.clearTimeout(timer);
-  }, [asset?.id, asset?.media_type, autoplayDelayMs, viewerSettingsLoading]);
+  }, [asset?.id, asset?.media_type, autoplayDelayMs, viewerSettingsLoading, playback.path]);
 
   function triggerNavigate(sign: 1 | -1, axis: Axis) {
     if (navLockRef.current || !asset) {
@@ -206,13 +210,30 @@ export default function Lightbox<T extends LightboxAsset>({
   function renderMedia(item: T, live: boolean) {
     const itemIsVideo = item.media_type === "video";
     const itemIsAudio = item.media_type === "audio";
-    const itemUrl = convertFileSrc(item.playback_path ?? item.original_path);
+    const pending = live && itemIsVideo && !item.playback_path;
+    const resolvedPath = pending ? playback.path : (item.playback_path ?? item.original_path);
+    const itemUrl = resolvedPath ? convertFileSrc(resolvedPath) : "";
     const itemOverlayUrl = item.overlay_path ? convertFileSrc(item.overlay_path) : null;
     const itemLabel = formatDayGroup(item.taken_at).label;
 
     return (
       <>
-        {itemIsVideo ? (
+        {pending && !resolvedPath ? (
+          <div className="col-start-1 row-start-1 flex h-full min-h-40 w-full min-w-64 flex-col items-center justify-center gap-3 p-8 text-sm text-neutral-300">
+            {playback.error ? (
+              <>
+                <AlertCircle className="h-6 w-6 text-red-400" />
+                <p className="text-red-300">Could not prepare this video for playback.</p>
+                <p className="text-xs text-red-400">{playback.error}</p>
+              </>
+            ) : playback.converting ? (
+              <>
+                <Loader2 className="h-6 w-6 animate-spin text-accent" />
+                <p>Converting for playback...</p>
+              </>
+            ) : null}
+          </div>
+        ) : itemIsVideo ? (
           <video
             key={item.id}
             ref={live ? videoRef : undefined}

@@ -19,7 +19,7 @@ import Stat from "../components/Stat";
 import StorageChoiceModal from "../components/StorageChoiceModal";
 import ThumbnailGenerator from "../components/ThumbnailGenerator";
 import { useLibraryStats } from "../hooks/useLibraryStats";
-import { usePerformanceSettings, type TranscodePreset } from "../hooks/usePerformanceSettings";
+import { useHwEncoders, usePerformanceSettings, type PerformanceSettings, type TranscodePreset } from "../hooks/usePerformanceSettings";
 import { useProfile } from "../hooks/useProfile";
 import { useStorageInfo } from "../hooks/useStorageSettings";
 import { useViewerSettings } from "../hooks/useViewerSettings";
@@ -426,9 +426,27 @@ function ViewerSettingsPanel() {
   );
 }
 
+const TRANSCODE_MODE_OPTIONS: { value: PerformanceSettings["transcode_mode"]; label: string }[] = [
+  { value: "background", label: "In the background" },
+  { value: "on_open", label: "When I open a video" },
+];
+
 function PerformanceSettingsPanel() {
   const { settings, isLoading, error, update } = usePerformanceSettings();
+  const hw = useHwEncoders();
   const [isSaving, setIsSaving] = useState(false);
+
+  async function handlePatch(patch: Partial<PerformanceSettings>) {
+    if (!settings) {
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await update({ ...settings, ...patch });
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
   async function handlePresetChange(preset: TranscodePreset) {
     if (!settings || preset === settings.transcode_preset) {
@@ -487,8 +505,62 @@ function PerformanceSettingsPanel() {
             </div>
           </SettingsRow>
 
-          <SettingsRow label="Limit CPU usage while processing" hint="Caps media processing to about half your CPU cores, so the rest of your machine stays responsive during a large import or backlog run." last>
+          <SettingsRow label="Limit CPU usage while processing" hint="Caps media processing to about half your CPU cores, so the rest of your machine stays responsive during a large import or backlog run.">
             <Toggle checked={settings.limit_cpu_usage} onChange={handleToggleCpuLimit} disabled={isSaving} />
+          </SettingsRow>
+
+          <SettingsRow label="Video conversion" hint="Converting when you open a video saves CPU, but the first play of each HEVC video waits for a conversion.">
+            <div className="flex flex-wrap justify-end gap-2">
+              {TRANSCODE_MODE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => settings.transcode_mode !== option.value && handlePatch({ transcode_mode: option.value })}
+                  disabled={isSaving}
+                  className={["btn disabled:cursor-not-allowed", settings.transcode_mode === option.value ? "btn-primary" : "btn-secondary"].join(" ")}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </SettingsRow>
+
+          <SettingsRow label="Hardware acceleration" hint={hw.error ? `Could not detect encoders: ${hw.error}` : "Use your GPU to convert videos faster. Auto picks the best working encoder."}>
+            <div className="flex items-center justify-end gap-2">
+              {hw.isLoading ? <LoaderCircle className="h-4 w-4 animate-spin text-neutral-500" /> : null}
+              <select
+                value={settings.hw_accel}
+                onChange={(event) => void handlePatch({ hw_accel: event.target.value as PerformanceSettings["hw_accel"] })}
+                disabled={isSaving || hw.isLoading}
+                className="rounded-md bg-surface px-3 py-2 text-sm ring-1 ring-divider"
+              >
+                <option value="auto">Auto</option>
+                <option value="off">Off</option>
+                {settings.hw_accel !== "auto" &&
+                settings.hw_accel !== "off" &&
+                !(hw.encoders ?? []).some((enc) => enc.available && enc.id === settings.hw_accel) ? (
+                  <option value={settings.hw_accel} disabled>
+                    {settings.hw_accel} (not available)
+                  </option>
+                ) : null}
+                {(hw.encoders ?? []).filter((enc) => enc.available).map((enc) => {
+                  const broken = enc.available && !enc.works;
+                  return (
+                    <option key={enc.id} value={enc.id} disabled={broken}>
+                      {enc.label}
+                      {broken ? " (not working on this machine)" : ""}
+                    </option>
+                  );
+                })}
+              </select>
+              <button type="button" onClick={() => void hw.recheck()} disabled={hw.isLoading} className="btn btn-secondary disabled:cursor-not-allowed">
+                Re-check
+              </button>
+            </div>
+          </SettingsRow>
+
+          <SettingsRow label="Process media when SnapVault starts" hint="Resume any unfinished thumbnails and video conversions each time the app opens." last>
+            <Toggle checked={settings.process_on_startup} onChange={() => handlePatch({ process_on_startup: !settings.process_on_startup })} disabled={isSaving} />
           </SettingsRow>
         </div>
       )}

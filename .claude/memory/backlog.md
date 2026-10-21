@@ -21,3 +21,9 @@
 - [ ] One corrupt export video (moov atom missing) keeps logging a transcode error; mark it unplayable.
 - [ ] No frontend test runner; add Vitest + a few hook/component tests.
 - [ ] Unverified: CSP effect on photo lightbox, dialogs, GitHub link.
+
+## Added 2026-10-21 (processing control)
+- [ ] Settings stat 'Videos pending conversion' counts any video with NULL playback_path, including playable H.264 (maintenance.rs ~50); count only assets that actually need a transcode.
+- [ ] Hardware transcode (AMF verified working on RX 6700 XT; NVENC/QSV listed but not working here) is unmeasured on real HEVC: benchmark speed and file size (AMF cqp output was ~2.2x larger than x264 on a synthetic clip).
+- [ ] Import UI should show a 'media phase cancelled' note (IngestionSummary.media_cancelled exists, UI ignores it).
+- [ ] Browser-safe videos never get a playback_path, so each Lightbox open runs an ffprobe; record it once.

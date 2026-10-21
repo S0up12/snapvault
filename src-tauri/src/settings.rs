@@ -30,9 +30,32 @@ impl TranscodePreset {
     }
 }
 
+/// When playback transcodes run. Persisted only for now; behavior lands in a later step.
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscodeMode {
+    #[default]
+    Background,
+    OnOpen,
+}
+
+/// Hardware encoder choice. Persisted only for now; behavior lands in a later step.
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum HwAccel {
+    Auto,
+    #[default]
+    Off,
+    Nvenc,
+    Qsv,
+    Amf,
+}
+
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
-#[derive(Default)]
 pub struct PerformanceSettings {
     #[serde(default)]
     pub transcode_preset: TranscodePreset,
@@ -42,6 +65,25 @@ pub struct PerformanceSettings {
     /// unrestricted behavior).
     #[serde(default)]
     pub limit_cpu_usage: bool,
+    /// Resume unfinished media processing automatically at app launch.
+    #[serde(default = "default_true")]
+    pub process_on_startup: bool,
+    #[serde(default)]
+    pub transcode_mode: TranscodeMode,
+    #[serde(default)]
+    pub hw_accel: HwAccel,
+}
+
+impl Default for PerformanceSettings {
+    fn default() -> Self {
+        Self {
+            transcode_preset: TranscodePreset::default(),
+            limit_cpu_usage: false,
+            process_on_startup: true,
+            transcode_mode: TranscodeMode::default(),
+            hw_accel: HwAccel::default(),
+        }
+    }
 }
 
 
@@ -88,10 +130,6 @@ pub fn set_performance_settings(app: AppHandle, settings: PerformanceSettings) -
 }
 
 const VIEWER_SETTINGS_FILE: &str = "viewer_settings.json";
-
-fn default_true() -> bool {
-    true
-}
 
 /// Preferences for the fullscreen media lightbox.
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -154,14 +192,25 @@ mod tests {
 
     #[test]
     fn thread_cap_is_none_when_limit_disabled() {
-        let settings = PerformanceSettings { transcode_preset: TranscodePreset::Quality, limit_cpu_usage: false };
+        let settings = PerformanceSettings { limit_cpu_usage: false, ..Default::default() };
         assert_eq!(settings.ffmpeg_thread_cap(), None);
     }
 
     #[test]
     fn thread_cap_is_at_least_one_when_limit_enabled() {
-        let settings = PerformanceSettings { transcode_preset: TranscodePreset::Quality, limit_cpu_usage: true };
+        let settings = PerformanceSettings { limit_cpu_usage: true, ..Default::default() };
         assert!(settings.ffmpeg_thread_cap().unwrap() >= 1);
+    }
+
+    #[test]
+    fn old_performance_file_loads_with_new_defaults() {
+        let s: PerformanceSettings = serde_json::from_str(r#"{"transcode_preset":"fastest","limit_cpu_usage":true}"#).unwrap();
+        assert!(s.limit_cpu_usage && s.process_on_startup);
+        assert_eq!((s.transcode_mode, s.hw_accel), (TranscodeMode::Background, HwAccel::Off));
+        let s: PerformanceSettings = serde_json::from_str("{}").unwrap();
+        assert!(s.process_on_startup);
+        let v = serde_json::to_value(PerformanceSettings { transcode_mode: TranscodeMode::OnOpen, hw_accel: HwAccel::Nvenc, ..Default::default() }).unwrap();
+        assert_eq!((v["transcode_mode"].as_str(), v["hw_accel"].as_str()), (Some("on_open"), Some("nvenc")));
     }
 
     #[test]

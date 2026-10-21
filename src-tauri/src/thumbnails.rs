@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::cell::RefCell;
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -12,7 +13,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::DbState;
-use crate::settings::PerformanceSettings;
+use crate::settings::{HwAccel, PerformanceSettings, TranscodeMode};
 
 const PROGRESS_EVENT: &str = "thumbnails://progress";
 const THUMBNAIL_SIZE: &str = "360:360";
@@ -60,6 +61,18 @@ enum ProgressPayload {
     Completed {
         summary: ThumbnailSummary,
     },
+    /// Run stopped by the user; `summary` counts what finished before the stop.
+    Cancelled {
+        summary: ThumbnailSummary,
+    },
+    Paused {
+        processed: usize,
+        total: usize,
+    },
+    Resumed {
+        processed: usize,
+        total: usize,
+    },
     Error {
         message: String,
     },
@@ -72,6 +85,175 @@ pub struct ThumbnailSummary {
     pub failed: usize,
     pub playback_transcoded: usize,
     pub playback_failed: usize,
+    pub cancelled: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RunState {
+    Idle,
+    Running,
+    Paused,
+    Cancelling,
+}
+
+impl RunState {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Running => "running",
+            Self::Paused => "paused",
+            Self::Cancelling => "cancelling",
+        }
+    }
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Run-control state machine shared by the commands and the worker pool.
+/// Idle -> Running (slot acquired) <-> Paused; Running/Paused -> Cancelling;
+/// back to Idle when the slot drops. Pause is cooperative: workers block
+/// between assets, so a file already being transcoded finishes first. Cancel
+/// also kills the running ffmpeg/ffprobe children (see `run_output`).
+pub struct MediaControl {
+    state: Mutex<RunState>,
+    cv: Condvar,
+    children: Mutex<Vec<Arc<Mutex<Child>>>>,
+    processed: AtomicUsize,
+    total: AtomicUsize,
+}
+
+impl Default for MediaControl {
+    fn default() -> Self {
+        Self {
+            state: Mutex::new(RunState::Idle),
+            cv: Condvar::new(),
+            children: Mutex::new(Vec::new()),
+            processed: AtomicUsize::new(0),
+            total: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl MediaControl {
+    pub fn state(&self) -> RunState {
+        *lock(&self.state)
+    }
+
+    fn is_cancelling(&self) -> bool {
+        self.state() == RunState::Cancelling
+    }
+
+    fn try_start(&self) -> bool {
+        let mut st = lock(&self.state);
+        if *st != RunState::Idle {
+            return false;
+        }
+        *st = RunState::Running;
+        self.processed.store(0, Ordering::SeqCst);
+        self.total.store(0, Ordering::SeqCst);
+        true
+    }
+
+    fn finish(&self) {
+        *lock(&self.state) = RunState::Idle;
+        self.cv.notify_all();
+    }
+
+    fn transition(&self, from: &[RunState], to: RunState) -> Result<(), String> {
+        let mut st = lock(&self.state);
+        if !from.contains(&*st) {
+            return Err(match *st {
+                RunState::Idle => "No media processing is running.".to_string(),
+                other => format!("Cannot do that while media processing is {}.", other.as_str()),
+            });
+        }
+        *st = to;
+        self.cv.notify_all();
+        Ok(())
+    }
+
+    pub fn pause(&self) -> Result<(), String> {
+        self.transition(&[RunState::Running], RunState::Paused)
+    }
+
+    pub fn resume(&self) -> Result<(), String> {
+        self.transition(&[RunState::Paused], RunState::Running)
+    }
+
+    pub fn cancel(&self) -> Result<(), String> {
+        self.transition(&[RunState::Running, RunState::Paused], RunState::Cancelling)?;
+        for child in lock(&self.children).iter() {
+            let _ = lock(child).kill();
+        }
+        Ok(())
+    }
+
+    /// Worker gate between assets: blocks (no CPU) while paused; false = stop.
+    fn wait_for_turn(&self) -> bool {
+        let mut st = lock(&self.state);
+        loop {
+            match *st {
+                RunState::Paused => st = self.cv.wait(st).unwrap_or_else(|e| e.into_inner()),
+                RunState::Cancelling => return false,
+                _ => return true,
+            }
+        }
+    }
+
+    fn counts(&self) -> (usize, usize) {
+        (self.processed.load(Ordering::SeqCst), self.total.load(Ordering::SeqCst))
+    }
+}
+
+thread_local! {
+    /// Set on each media worker so `run_output` can register its child.
+    static ACTIVE_CTL: RefCell<Option<Arc<MediaControl>>> = const { RefCell::new(None) };
+}
+
+fn cancelled() -> bool {
+    ACTIVE_CTL.with(|c| c.borrow().as_ref().is_some_and(|ctl| ctl.is_cancelling()))
+}
+
+/// Like `Command::output`, but on a media worker the child is registered so
+/// `MediaControl::cancel` can kill it. Polls `try_wait` (5ms) because the
+/// child must stay shareable while we wait.
+fn run_output(cmd: &mut Command) -> std::io::Result<Output> {
+    use std::io::Read;
+    let Some(ctl) = ACTIVE_CTL.with(|c| c.borrow().clone()) else {
+        return cmd.output();
+    };
+    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        })
+    }
+    let out_t = drain(child.stdout.take());
+    let err_t = drain(child.stderr.take());
+    let child = Arc::new(Mutex::new(child));
+    lock(&ctl.children).push(child.clone());
+    if ctl.is_cancelling() {
+        // Cancel's kill pass may have run before we registered.
+        let _ = lock(&child).kill();
+    }
+    let status = loop {
+        match lock(&child).try_wait() {
+            Ok(Some(s)) => break Ok(s),
+            Ok(None) => {}
+            Err(e) => break Err(e),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    lock(&ctl.children).retain(|c| !Arc::ptr_eq(c, &child));
+    let stdout = out_t.join().unwrap_or_default();
+    let stderr = err_t.join().unwrap_or_default();
+    Ok(Output { status: status?, stdout, stderr })
 }
 
 /// Tracks whether `process_pending_media` is currently running, so the
@@ -79,7 +261,13 @@ pub struct ThumbnailSummary {
 /// both would otherwise pull the same pending assets and race writing the
 /// same `{id}.tmp.mp4` output paths.
 #[derive(Default)]
-pub struct MediaProcessingState(AtomicBool);
+pub struct MediaProcessingState {
+    ctl: Arc<MediaControl>,
+}
+
+pub(crate) fn media_ctl(app: &AppHandle) -> Arc<MediaControl> {
+    app.state::<MediaProcessingState>().ctl.clone()
+}
 
 struct PendingAsset {
     id: String,
@@ -128,6 +316,7 @@ pub(crate) fn process_pending_media(
     db: &Mutex<Connection>,
     app_data_dir: &Path,
     settings: &PerformanceSettings,
+    ctl: &Arc<MediaControl>,
     emit: &dyn Fn(usize, usize, String),
 ) -> Result<ThumbnailSummary, String> {
     let thumbnail_dir = app_data_dir.join("thumbnails");
@@ -138,11 +327,19 @@ pub(crate) fn process_pending_media(
         )
     })?;
 
-    let pending = {
+    let mut pending = {
         let conn = db.lock().map_err(|err| err.to_string())?;
         load_pending_assets(&conn, app_data_dir)?
     };
+    // On-open mode: transcodes happen in `ensure_playback`; those assets stay pending.
+    if settings.transcode_mode == TranscodeMode::OnOpen {
+        pending.retain_mut(|a| {
+            a.needs_playback = false;
+            a.needs_thumbnail
+        });
+    }
     let total = pending.len();
+    ctl.total.store(total, Ordering::SeqCst);
     emit(0, total, "Processing media".to_string());
 
     if total == 0 {
@@ -152,6 +349,7 @@ pub(crate) fn process_pending_media(
             failed: 0,
             playback_transcoded: 0,
             playback_failed: 0,
+            cancelled: false,
         });
     }
 
@@ -166,7 +364,7 @@ pub(crate) fn process_pending_media(
     let stop = AtomicBool::new(false);
     let (tx, rx) = std::sync::mpsc::channel::<(String, Vec<Op>)>();
     let workers = settings.media_workers().min(total);
-    let mut summary = ThumbnailSummary { total, generated: 0, failed: 0, playback_transcoded: 0, playback_failed: 0 };
+    let mut summary = ThumbnailSummary { total, generated: 0, failed: 0, playback_transcoded: 0, playback_failed: 0, cancelled: false };
     let mut batch: Vec<(String, Vec<Op>)> = Vec::new();
     let mut db_err: Option<String> = None;
     let mut processed = 0usize;
@@ -176,11 +374,20 @@ pub(crate) fn process_pending_media(
             let tx = tx.clone();
             let (next, stop, pending, thumbnail_dir) = (&next, &stop, &pending, &thumbnail_dir);
             let root = app_data_dir;
+            let ctl = ctl.clone();
             scope.spawn(move || {
+                ACTIVE_CTL.with(|c| *c.borrow_mut() = Some(ctl.clone()));
                 while !stop.load(Ordering::Relaxed) {
+                    if !ctl.wait_for_turn() {
+                        break;
+                    }
                     let i = next.fetch_add(1, Ordering::Relaxed);
                     let Some(asset) = pending.get(i) else { break };
-                    let ops = process_one(asset, root, thumbnail_dir, settings);
+                    let ops = process_one(asset, db, root, thumbnail_dir, settings);
+                    // Killed mid-asset: leave it pending (no ops, nothing marked failed).
+                    if ctl.is_cancelling() && ops.iter().all(|o| !matches!(o, Op::Thumb(_) | Op::Playback { .. } | Op::Audio)) {
+                        break;
+                    }
                     if tx.send((asset.id.clone(), ops)).is_err() {
                         break;
                     }
@@ -201,6 +408,7 @@ pub(crate) fn process_pending_media(
             }
             batch.push((id, ops));
             processed += 1;
+            ctl.processed.store(processed, Ordering::SeqCst);
             if batch.len() >= DB_BATCH && db_err.is_none() {
                 if let Err(err) = flush_ops(db, &mut batch) {
                     db_err = Some(err);
@@ -217,6 +425,7 @@ pub(crate) fn process_pending_media(
             db_err = Some(err);
         }
     }
+    summary.cancelled = ctl.is_cancelling() && processed < total;
     match db_err {
         Some(err) => Err(err),
         None => Ok(summary),
@@ -225,6 +434,386 @@ pub(crate) fn process_pending_media(
 
 const DB_BATCH: usize = 50;
 static TRANSCODE_GATE: Mutex<()> = Mutex::new(());
+/// On-open transcodes waiting for / holding the gate; background ones yield while > 0.
+static PRIORITY_WAITERS: AtomicUsize = AtomicUsize::new(0);
+
+struct PriorityWaiter;
+impl PriorityWaiter {
+    fn new() -> Self {
+        PRIORITY_WAITERS.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+impl Drop for PriorityWaiter {
+    fn drop(&mut self) {
+        PRIORITY_WAITERS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum HwEncoder {
+    Nvenc,
+    Qsv,
+    Amf,
+}
+
+/// Auto picks the first working one in this order.
+const HW_ORDER: [HwEncoder; 3] = [HwEncoder::Nvenc, HwEncoder::Qsv, HwEncoder::Amf];
+
+impl HwEncoder {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Nvenc => "nvenc",
+            Self::Qsv => "qsv",
+            Self::Amf => "amf",
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Nvenc => "NVIDIA NVENC",
+            Self::Qsv => "Intel Quick Sync",
+            Self::Amf => "AMD AMF",
+        }
+    }
+    fn ffmpeg_name(self) -> &'static str {
+        match self {
+            Self::Nvenc => "h264_nvenc",
+            Self::Qsv => "h264_qsv",
+            Self::Amf => "h264_amf",
+        }
+    }
+    /// Quality-based video args (codec through pix_fmt).
+    fn video_args(self) -> &'static [&'static str] {
+        match self {
+            Self::Nvenc => &["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23", "-pix_fmt", "yuv420p"],
+            Self::Qsv => &["-c:v", "h264_qsv", "-global_quality", "23", "-preset", "medium", "-pix_fmt", "nv12"],
+            Self::Amf => &[
+                "-c:v", "h264_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "23", "-qp_p", "23", "-qp_b", "23", "-pix_fmt", "yuv420p",
+            ],
+        }
+    }
+}
+
+/// Pure encoder choice: `None` = libx264.
+fn choose_encoder(pref: HwAccel, works: impl Fn(HwEncoder) -> bool) -> Option<HwEncoder> {
+    let wanted = match pref {
+        HwAccel::Off => return None,
+        HwAccel::Auto => return HW_ORDER.into_iter().find(|e| works(*e)),
+        HwAccel::Nvenc => HwEncoder::Nvenc,
+        HwAccel::Qsv => HwEncoder::Qsv,
+        HwAccel::Amf => HwEncoder::Amf,
+    };
+    works(wanted).then_some(wanted)
+}
+
+fn select_encoder(settings: &PerformanceSettings) -> Option<HwEncoder> {
+    if settings.hw_accel == HwAccel::Off {
+        return None;
+    }
+    if HW_BROKEN.load(Ordering::SeqCst) {
+        return None;
+    }
+    let info = cached_hw_encoders().unwrap_or_default();
+    let chosen = choose_encoder(settings.hw_accel, |e| info.iter().any(|i| i.id == e.id() && i.works));
+    if chosen.is_none() && settings.hw_accel != HwAccel::Auto {
+        crate::log::log_warn!("[thumbnails] requested hardware encoder unavailable, using libx264");
+    }
+    chosen
+}
+
+#[derive(Clone, Serialize, Debug)]
+pub struct HwEncoderInfo {
+    pub id: String,
+    pub label: String,
+    pub available: bool,
+    pub works: bool,
+}
+
+enum HwState {
+    Unknown,
+    Detecting,
+    Ready(Vec<HwEncoderInfo>),
+}
+static HW_STATE: (Mutex<HwState>, Condvar) = (Mutex::new(HwState::Unknown), Condvar::new());
+
+/// 1-second-ish synthetic encode; killed after 20s so a broken driver can't hang us.
+fn test_encode(enc: HwEncoder) -> bool {
+    let Ok(mut child) = no_window_command("ffmpeg")
+        .args(["-hide_banner", "-v", "error", "-f", "lavfi", "-i", "testsrc=s=256x256:r=10:d=1", "-frames:v", "10"])
+        .args(enc.video_args())
+        .args(["-f", "null", "-"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        match child.try_wait() {
+            Ok(Some(s)) => return s.success(),
+            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
+/// Set when a hw transcode failed but libx264 succeeded; later assets skip hw
+/// until `hw_encoders(force=true)` clears it.
+static HW_BROKEN: AtomicBool = AtomicBool::new(false);
+
+/// `ffmpeg -encoders` stdout, killed after 10s.
+fn list_encoders() -> Result<String, String> {
+    let mut child = no_window_command("ffmpeg")
+        .args(["-hide_banner", "-encoders"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|err| format!("ffmpeg not found on PATH: {err}"))?;
+    let mut stdout = child.stdout.take();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut s = String::new();
+        if let Some(o) = stdout.as_mut() {
+            let _ = std::io::Read::read_to_string(o, &mut s);
+        }
+        let _ = tx.send(s);
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+        Ok(s) => {
+            let _ = child.wait();
+            Ok(s)
+        }
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            Err("ffmpeg -encoders timed out".to_string())
+        }
+    }
+}
+
+/// Runs detection with no lock held and stores the result (an empty list on
+/// failure, so a broken ffmpeg isn't re-probed every transcode). The caller
+/// must already have set the state to `Detecting`.
+fn run_detection() -> Result<Vec<HwEncoderInfo>, String> {
+    // Resets Detecting -> Ready(empty) if detection panics, so waiters never hang.
+    struct Finish(Option<Vec<HwEncoderInfo>>);
+    impl Drop for Finish {
+        fn drop(&mut self) {
+            *lock(&HW_STATE.0) = HwState::Ready(self.0.take().unwrap_or_default());
+            HW_STATE.1.notify_all();
+        }
+    }
+    let mut fin = Finish(None);
+    let infos = list_encoders().map(|listing| {
+        HW_ORDER
+            .into_iter()
+            .map(|e| {
+                let available = listing.split_whitespace().any(|w| w == e.ffmpeg_name());
+                HwEncoderInfo { id: e.id().into(), label: e.label().into(), available, works: available && test_encode(e) }
+            })
+            .collect::<Vec<_>>()
+    });
+    if let Ok(infos) = &infos {
+        crate::log::log_info!(
+            "[thumbnails] hw encoders working: {}",
+            infos.iter().filter(|i| i.works).map(|i| i.id.as_str()).collect::<Vec<_>>().join(",")
+        );
+        fin.0 = Some(infos.clone());
+    }
+    infos
+}
+
+/// For the Settings command: cached for the session; `force` re-runs the tests.
+/// Concurrent callers wait for the one running detection (never holds the lock
+/// while ffmpeg runs).
+fn hw_encoders(force: bool) -> Result<Vec<HwEncoderInfo>, String> {
+    let mut state = lock(&HW_STATE.0);
+    loop {
+        match &*state {
+            HwState::Detecting => state = HW_STATE.1.wait(state).unwrap_or_else(|e| e.into_inner()),
+            HwState::Ready(c) if !force => return Ok(c.clone()),
+            _ => break,
+        }
+    }
+    *state = HwState::Detecting;
+    drop(state);
+    if force {
+        HW_BROKEN.store(false, Ordering::SeqCst);
+    }
+    run_detection()
+}
+
+/// Non-blocking read for background work: `None` while unknown/detecting
+/// (the first caller kicks off detection in a background thread).
+fn cached_hw_encoders() -> Option<Vec<HwEncoderInfo>> {
+    let mut state = lock(&HW_STATE.0);
+    match &*state {
+        HwState::Ready(c) => Some(c.clone()),
+        HwState::Detecting => None,
+        HwState::Unknown => {
+            *state = HwState::Detecting;
+            drop(state);
+            std::thread::spawn(|| {
+                let _ = run_detection();
+            });
+            None
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn detect_hw_encoders(force_refresh: Option<bool>) -> Result<Vec<HwEncoderInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || hw_encoders(force_refresh.unwrap_or(false)))
+        .await
+        .map_err(|err| format!("encoder detection panicked: {err}"))?
+}
+
+/// One ffmpeg transcode of `input` into `tmp_path` (removed on failure), one at a time.
+fn run_transcode(input: &Path, tmp_path: &Path, settings: &PerformanceSettings, enc: Option<HwEncoder>) -> Result<(), String> {
+    let mut command = no_window_command("ffmpeg");
+    command.arg("-y");
+    if enc.is_some() {
+        command.args(["-hwaccel", "auto"]);
+    }
+    command.arg("-i").arg(input).args(["-map", "0:v:0", "-map", "0:a:0?"]);
+    match enc {
+        Some(e) => {
+            command.args(e.video_args());
+        }
+        None => {
+            command.args(["-c:v", "libx264", "-preset", settings.transcode_preset.ffmpeg_preset(), "-crf", "23", "-pix_fmt", "yuv420p"]);
+            if let Some(thread_cap) = settings.ffmpeg_thread_cap() {
+                command.args(["-threads", &thread_cap.to_string()]);
+            }
+        }
+    }
+    command.args(["-movflags", "+faststart"]).args(["-c:a", "aac", "-b:a", "128k"]).arg(tmp_path);
+    // At most one transcode at a time regardless of worker count.
+    let gate = lock(&TRANSCODE_GATE);
+    crate::log::log_info!("[thumbnails] transcoding with {}", enc.map_or("libx264", |e| e.id()));
+    let output = run_output(&mut command).map_err(|err| format!("failed to run ffmpeg (is it installed and on PATH?): {err}"));
+    drop(gate);
+    let output = output?;
+    if !output.status.success() {
+        let _ = std::fs::remove_file(tmp_path);
+        return Err(format!("ffmpeg exited with {}: {}", output.status, String::from_utf8_lossy(&output.stderr)));
+    }
+    Ok(())
+}
+
+#[derive(Clone, Serialize, Debug)]
+pub struct PlaybackInfo {
+    pub path: String,
+    pub converted: bool,
+}
+
+type Inflight = Arc<(Mutex<Option<Result<PlaybackInfo, String>>>, Condvar)>;
+static INFLIGHT: std::sync::LazyLock<Mutex<std::collections::HashMap<String, Inflight>>> =
+    std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+/// Transcode-on-open. Concurrent calls for one asset share a single run.
+/// Ignores pause/cancel (user-initiated; runs on a plain thread, so run
+/// control can't kill it). Process exit kills ffmpeg; a leftover tmp file is
+/// overwritten by the next attempt.
+fn ensure_playback_for(db: &Mutex<Connection>, root: &Path, settings: &PerformanceSettings, id: &str) -> Result<PlaybackInfo, String> {
+    let (slot, leader) = {
+        let mut map = lock(&INFLIGHT);
+        match map.get(id) {
+            Some(s) => (s.clone(), false),
+            None => {
+                let s: Inflight = Arc::new((Mutex::new(None), Condvar::new()));
+                map.insert(id.to_string(), s.clone());
+                (s, true)
+            }
+        }
+    };
+    if !leader {
+        let mut res = lock(&slot.0);
+        while res.is_none() {
+            res = slot.1.wait(res).unwrap_or_else(|e| e.into_inner());
+        }
+        return res.clone().unwrap_or_else(|| Err("playback result missing".into()));
+    }
+    let _guard = InflightGuard { id, slot: &slot };
+    let result = ensure_playback_run(db, root, settings, id);
+    *lock(&slot.0) = Some(result.clone());
+    result
+}
+
+/// Held by the leader; on drop (normal, error or panic) stores an Err if no
+/// result was stored, removes the INFLIGHT entry and wakes waiters.
+struct InflightGuard<'a> {
+    id: &'a str,
+    slot: &'a Inflight,
+}
+impl Drop for InflightGuard<'_> {
+    fn drop(&mut self) {
+        lock(&self.slot.0).get_or_insert_with(|| Err("playback run aborted".to_string()));
+        lock(&INFLIGHT).remove(self.id);
+        self.slot.1.notify_all();
+    }
+}
+
+fn ensure_playback_run(db: &Mutex<Connection>, root: &Path, settings: &PerformanceSettings, id: &str) -> Result<PlaybackInfo, String> {
+    let (media_type, original, playback): (String, String, Option<String>) = {
+        let conn = db.lock().map_err(|err| err.to_string())?;
+        conn.query_row("SELECT media_type, original_path, playback_path FROM assets WHERE id = ?1", [id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })
+        .map_err(|err| format!("asset not found: {err}"))?
+    };
+    let abs = |p: &str| crate::storage::to_absolute(root, p);
+    let original_abs = abs(&original);
+    let done = |path: &Path, converted| PlaybackInfo { path: path.display().to_string(), converted };
+    if media_type != "video" {
+        return Ok(done(&original_abs, false));
+    }
+    let playback_abs = playback.as_deref().map(abs).filter(|p| p.is_file());
+    if let Some(p) = &playback_abs {
+        return Ok(done(p, false));
+    }
+    let asset = PendingAsset {
+        id: id.to_string(),
+        media_type,
+        original_path: original_abs.display().to_string(),
+        overlay_path: None,
+        playback_path: None,
+        needs_thumbnail: false,
+        needs_playback: true,
+    };
+    match ensure_playback_copy(&asset, settings, true)? {
+        None => Ok(done(&original_abs, false)),
+        Some(final_path) => {
+            let mut batch = vec![(
+                id.to_string(),
+                vec![Op::Playback {
+                    final_path: crate::storage::to_relative(root, &final_path.display().to_string()),
+                    old_path: (final_path != original_abs).then_some(original_abs),
+                }],
+            )];
+            flush_ops(db, &mut batch)?;
+            Ok(done(&final_path, true))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn ensure_playback(app: AppHandle, asset_id: String) -> Result<PlaybackInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = crate::storage::resolve_media_root(&app)?;
+        let settings = crate::settings::get_performance_settings(app.clone())?;
+        ensure_playback_for(&app.state::<DbState>().0, &root, &settings, &asset_id)
+    })
+    .await
+    .map_err(|err| format!("playback task panicked: {err}"))?
+}
 
 enum Op {
     Audio,
@@ -239,7 +828,19 @@ enum Op {
 }
 
 /// Slow, DB-free work for one asset (ffprobe + ffmpeg); never aborts the run.
-fn process_one(asset: &PendingAsset, root: &Path, thumbnail_dir: &Path, settings: &PerformanceSettings) -> Vec<Op> {
+/// True when the DB now shows an in-place conversion (playback_path ==
+/// original_path, file present), e.g. an on-open transcode finished after
+/// this run loaded its snapshot. A legacy side-by-side copy has differing
+/// paths and is not matched.
+fn converted_meanwhile(db: &Mutex<Connection>, root: &Path, id: &str) -> bool {
+    let Ok(conn) = db.lock() else { return false };
+    let row: Option<(String, Option<String>)> =
+        conn.query_row("SELECT original_path, playback_path FROM assets WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).ok();
+    drop(conn);
+    row.is_some_and(|(orig, pb)| pb.as_deref() == Some(orig.as_str()) && crate::storage::to_absolute(root, &orig).is_file())
+}
+
+fn process_one(asset: &PendingAsset, db: &Mutex<Connection>, root: &Path, thumbnail_dir: &Path, settings: &PerformanceSettings) -> Vec<Op> {
     let mut ops = Vec::new();
     // Snapchat voice notes are exported as audio-only .mp4 containers,
     // which `media_type_for_extension` classifies as `video` since it
@@ -255,11 +856,18 @@ fn process_one(asset: &PendingAsset, root: &Path, thumbnail_dir: &Path, settings
         ops.push(Op::Audio);
         return ops;
     }
+    if cancelled() {
+        return ops;
+    }
 
     if asset.needs_thumbnail {
         let output_path = thumbnail_dir.join(format!("{}.webp", asset.id));
         match generate_one_thumbnail(asset, &output_path, settings) {
             Ok(()) => ops.push(Op::Thumb(crate::storage::to_relative(root, &output_path.display().to_string()))),
+            Err(_) if cancelled() => {
+                let _ = std::fs::remove_file(&output_path); // partial output
+                return ops;
+            }
             Err(err) => {
                 crate::log::log_error!("[thumbnails] failed for asset {}: {err}", asset.id);
                 // Marked so startup auto-resume doesn't retry forever; manual
@@ -270,13 +878,15 @@ fn process_one(asset: &PendingAsset, root: &Path, thumbnail_dir: &Path, settings
         }
     }
 
-    if asset.needs_playback {
-        match ensure_playback_copy(asset, settings) {
+    if asset.needs_playback && !converted_meanwhile(db, root, &asset.id) {
+        match ensure_playback_copy(asset, settings, false) {
             Ok(Some(final_path)) => ops.push(Op::Playback {
                 final_path: crate::storage::to_relative(root, &final_path.display().to_string()),
                 old_path: (final_path != Path::new(&asset.original_path)).then(|| PathBuf::from(&asset.original_path)),
             }),
             Ok(None) => {} // already browser-safe
+            Err(_) if cancelled() => {} // tmp file already removed by ensure_playback_copy
+            Err(_) if converted_meanwhile(db, root, &asset.id) => {} // on-open run got there first
             Err(err) => {
                 crate::log::log_error!("[thumbnails] playback transcode failed for asset {}: {err}", asset.id);
                 ops.push(Op::PlaybackFailed);
@@ -339,14 +949,13 @@ pub(crate) struct MediaSlot(AppHandle);
 
 impl Drop for MediaSlot {
     fn drop(&mut self) {
-        self.0.state::<MediaProcessingState>().0.store(false, Ordering::SeqCst);
+        self.0.state::<MediaProcessingState>().ctl.finish();
     }
 }
 
 impl MediaSlot {
     pub(crate) fn try_acquire(app: &AppHandle) -> Option<MediaSlot> {
-        let taken = app.state::<MediaProcessingState>().0.swap(true, Ordering::SeqCst);
-        (!taken).then(|| MediaSlot(app.clone()))
+        app.state::<MediaProcessingState>().ctl.try_start().then(|| MediaSlot(app.clone()))
     }
 
     /// Non-acquiring: true while any slot is held.
@@ -357,8 +966,47 @@ impl MediaSlot {
 
 impl MediaProcessingState {
     fn is_busy(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.ctl.state() != RunState::Idle
     }
+}
+
+#[derive(Serialize)]
+pub struct MediaStateView {
+    pub state: &'static str,
+    pub busy: bool,
+}
+
+#[tauri::command]
+pub fn get_media_state(app: AppHandle) -> Result<MediaStateView, String> {
+    let state = media_ctl(&app).state();
+    Ok(MediaStateView { state: state.as_str(), busy: state != RunState::Idle })
+}
+
+/// Takes effect after each worker's current asset finishes (a long transcode
+/// in flight completes first).
+#[tauri::command]
+pub fn pause_media_processing(app: AppHandle) -> Result<(), String> {
+    let ctl = media_ctl(&app);
+    ctl.pause()?;
+    let (processed, total) = ctl.counts();
+    let _ = app.emit(PROGRESS_EVENT, ProgressPayload::Paused { processed, total });
+    Ok(())
+}
+
+#[tauri::command]
+pub fn resume_media_processing(app: AppHandle) -> Result<(), String> {
+    let ctl = media_ctl(&app);
+    ctl.resume()?;
+    let (processed, total) = ctl.counts();
+    let _ = app.emit(PROGRESS_EVENT, ProgressPayload::Resumed { processed, total });
+    Ok(())
+}
+
+/// Kills running ffmpeg/ffprobe children; the run then returns with
+/// `cancelled: true` and emits status "cancelled".
+#[tauri::command]
+pub fn cancel_media_processing(app: AppHandle) -> Result<(), String> {
+    media_ctl(&app).cancel()
 }
 
 /// True while an import's media phase or a thumbnail run holds the slot.
@@ -407,7 +1055,7 @@ async fn run_and_emit(app: AppHandle, retry_failed: bool) -> Result<ThumbnailSum
             let emit = |processed: usize, total: usize, message: String| {
                 emit_progress(&app_for_blocking, processed, total, message);
             };
-            process_pending_media(&state.0, &media_root, &settings, &emit)
+            process_pending_media(&state.0, &media_root, &settings, &media_ctl(&app_for_blocking), &emit)
         },
     )
     .await
@@ -418,11 +1066,10 @@ async fn run_and_emit(app: AppHandle, retry_failed: bool) -> Result<ThumbnailSum
 
     match &result {
         Ok(summary) => {
+            let summary = summary.clone();
             let _ = app.emit(
                 PROGRESS_EVENT,
-                ProgressPayload::Completed {
-                    summary: summary.clone(),
-                },
+                if summary.cancelled { ProgressPayload::Cancelled { summary } } else { ProgressPayload::Completed { summary } },
             );
         }
         Err(message) => {
@@ -456,6 +1103,9 @@ pub async fn generate_thumbnails(app: AppHandle) -> Result<ThumbnailSummary, Str
 /// notice and click "Reprocess media". Fire-and-forget: errors are logged,
 /// not surfaced to any caller, since there isn't one at startup.
 pub fn resume_pending_media_on_startup(app: AppHandle) {
+    if !crate::settings::get_performance_settings(app.clone()).map(|s| s.process_on_startup).unwrap_or(true) {
+        return;
+    }
     tauri::async_runtime::spawn(async move {
         if let Err(err) = run_and_emit(app, false).await {
             crate::log::log_error!("[thumbnails] startup auto-resume failed: {err}");
@@ -503,15 +1153,16 @@ fn load_pending_assets(conn: &Connection, root: &Path) -> Result<Vec<PendingAsse
 /// chat attachments are audio-only .mp4 containers that `process_pending_media`
 /// uses this to detect and reclassify (see its doc comment).
 fn has_video_stream(path: &Path) -> Result<bool, String> {
-    let output = no_window_command("ffprobe")
-        .args([
-            "-v", "error",
-            "-select_streams", "v",
-            "-show_entries", "stream=codec_type",
-            "-of", "json",
-        ])
-        .arg(path)
-        .output()
+    let output = run_output(
+        no_window_command("ffprobe")
+            .args([
+                "-v", "error",
+                "-select_streams", "v",
+                "-show_entries", "stream=codec_type",
+                "-of", "json",
+            ])
+            .arg(path),
+    )
         .map_err(|err| format!("failed to run ffprobe (is it installed and on PATH?): {err}"))?;
     if !output.status.success() {
         return Err(format!(
@@ -536,7 +1187,7 @@ fn has_video_stream(path: &Path) -> Result<bool, String> {
 /// permanently doubling disk usage for every converted video. Mirrors the old
 /// Python `MediaProcessor.ensure_browser_playback`, minus the duplication.
 /// Returns `Ok(None)` when nothing needed to change (already playback-safe).
-fn ensure_playback_copy(asset: &PendingAsset, settings: &PerformanceSettings) -> Result<Option<PathBuf>, String> {
+fn ensure_playback_copy(asset: &PendingAsset, settings: &PerformanceSettings, priority: bool) -> Result<Option<PathBuf>, String> {
     let input = PathBuf::from(&asset.original_path);
 
     // A side-by-side copy from before this function transcoded in place: it's
@@ -585,34 +1236,27 @@ fn ensure_playback_copy(asset: &PendingAsset, settings: &PerformanceSettings) ->
     // format it recognizes ("Unable to choose an output format").
     let tmp_path = parent.join(format!("{stem}.snapvault-tmp.mp4"));
 
-    let mut command = no_window_command("ffmpeg");
-    command
-        .args(["-y", "-i"])
-        .arg(&input)
-        .args(["-map", "0:v:0", "-map", "0:a:0?"])
-        .args(["-c:v", "libx264", "-preset", settings.transcode_preset.ffmpeg_preset(), "-crf", "23", "-pix_fmt", "yuv420p"]);
-    if let Some(thread_cap) = settings.ffmpeg_thread_cap() {
-        command.args(["-threads", &thread_cap.to_string()]);
+    // Priority (on-open) requests count as waiters for the whole attempt;
+    // background transcodes yield to them before queueing on the gate.
+    let _waiter = priority.then(PriorityWaiter::new);
+    if !priority {
+        while PRIORITY_WAITERS.load(Ordering::SeqCst) > 0 && !cancelled() {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
     }
-    command
-        .args(["-movflags", "+faststart"])
-        .args(["-c:a", "aac", "-b:a", "128k"])
-        .arg(&tmp_path);
-    // At most one transcode at a time regardless of worker count.
-    let gate = TRANSCODE_GATE.lock().unwrap_or_else(|e| e.into_inner());
-    let output = command
-        .output()
-        .map_err(|err| format!("failed to run ffmpeg (is it installed and on PATH?): {err}"))?;
 
-    drop(gate);
-    if !output.status.success() {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(format!(
-            "ffmpeg exited with {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
-        ));
+    let encoder = select_encoder(settings);
+    let mut result = run_transcode(&input, &tmp_path, settings, encoder);
+    if let (Err(err), Some(enc)) = (&result, encoder) {
+        if !cancelled() {
+            crate::log::log_warn!("[thumbnails] {} transcode failed, retrying with libx264: {}", enc.id(), err.lines().next().unwrap_or(""));
+            result = run_transcode(&input, &tmp_path, settings, None);
+            if result.is_ok() && !HW_BROKEN.swap(true, Ordering::SeqCst) {
+                crate::log::log_warn!("[thumbnails] hardware encoding failed at runtime; using libx264 until encoders are re-detected");
+            }
+        }
     }
+    result?;
 
     // `fs::rename` overwrites an existing destination on both Windows and
     // Unix, so when `final_path == input` this replaces the HEVC original
@@ -642,10 +1286,11 @@ fn needs_playback_transcode(path: &Path) -> Result<bool, String> {
         return Ok(true);
     }
 
-    let output = no_window_command("ffprobe")
-        .args(["-v", "error", "-show_entries", "stream=codec_name,codec_type", "-of", "json"])
-        .arg(path)
-        .output()
+    let output = run_output(
+        no_window_command("ffprobe")
+            .args(["-v", "error", "-show_entries", "stream=codec_name,codec_type", "-of", "json"])
+            .arg(path),
+    )
         .map_err(|err| format!("failed to run ffprobe (is it installed and on PATH?): {err}"))?;
     if !output.status.success() {
         return Err(format!(
@@ -760,8 +1405,7 @@ fn run_thumbnail_ffmpeg(
         .args(["-c:v", "libwebp", "-quality", WEBP_QUALITY])
         .arg(output_path);
 
-    let output = command
-        .output()
+    let output = run_output(&mut command)
         .map_err(|err| format!("failed to run ffmpeg (is it installed and on PATH?): {err}"))?;
 
     if !output.status.success() {
@@ -789,9 +1433,10 @@ mod tests {
         // ponytail: tests the state the guard flips; AppHandle<Wry> can't be mocked here.
         let s = MediaProcessingState::default();
         assert!(!s.is_busy());
-        s.0.store(true, Ordering::SeqCst);
+        assert!(s.ctl.try_start());
+        assert!(!s.ctl.try_start());
         assert!(s.is_busy());
-        s.0.store(false, Ordering::SeqCst);
+        s.ctl.finish();
         assert!(!s.is_busy());
     }
 
@@ -874,7 +1519,7 @@ mod tests {
             assert!(processed >= last.swap(processed, Ordering::SeqCst), "progress not monotonic");
         };
         let start = std::time::Instant::now();
-        let summary = process_pending_media(&db, &dir, &PerformanceSettings::default(), &emit).unwrap();
+        let summary = process_pending_media(&db, &dir, &PerformanceSettings::default(), &Arc::new(MediaControl::default()), &emit).unwrap();
         let secs = start.elapsed().as_secs_f64();
         eprintln!("bench_thumbnails: {} assets in {secs:.2}s = {:.1}/s", N + 1, (N + 1) as f64 / secs);
 
@@ -890,6 +1535,107 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM assets WHERE thumb_failed = 1", [], |r| r.get(0))
             .unwrap();
         assert_eq!((done, marked), (N as i64, 1));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn state_machine_transitions_and_errors() {
+        let c = MediaControl::default();
+        assert!(c.pause().is_err() && c.resume().is_err() && c.cancel().is_err());
+        assert!(c.try_start());
+        assert!(c.resume().is_err());
+        c.pause().unwrap();
+        assert_eq!(c.state(), RunState::Paused);
+        c.resume().unwrap();
+        c.pause().unwrap();
+        c.cancel().unwrap();
+        assert_eq!(c.state(), RunState::Cancelling);
+        assert!(c.pause().is_err() && c.cancel().is_err());
+        c.finish();
+        assert_eq!(c.state(), RunState::Idle);
+    }
+
+    #[test]
+    fn progress_payloads_serialize_status_strings() {
+        let summary = ThumbnailSummary { total: 3, generated: 1, failed: 0, playback_transcoded: 0, playback_failed: 0, cancelled: true };
+        let v = serde_json::to_value(ProgressPayload::Cancelled { summary }).unwrap();
+        assert_eq!(v["status"], "cancelled");
+        assert_eq!(v["summary"]["cancelled"], true);
+        assert_eq!(v["summary"]["generated"], 1);
+        let v = serde_json::to_value(ProgressPayload::Paused { processed: 2, total: 9 }).unwrap();
+        assert_eq!((v["status"].as_str(), v["processed"].as_u64(), v["total"].as_u64()), (Some("paused"), Some(2), Some(9)));
+        let v = serde_json::to_value(ProgressPayload::Resumed { processed: 2, total: 9 }).unwrap();
+        assert_eq!(v["status"], "resumed");
+    }
+
+    /// Pause blocks workers, resume continues, cancel stops promptly leaving
+    /// the rest pending (not failed). Skips without ffmpeg.
+    #[test]
+    fn pause_resume_cancel_control_a_run() {
+        if check_ffmpeg().is_err() {
+            eprintln!("ffmpeg missing, skipping pause_resume_cancel_control_a_run");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("snapvault-ctl-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let seed = dir.join("seed.png");
+        let gen = Command::new("ffmpeg")
+            .args(["-y", "-f", "lavfi", "-i", "testsrc=s=640x480:d=1", "-frames:v", "1"])
+            .arg(&seed)
+            .output()
+            .unwrap();
+        assert!(gen.status.success());
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        const N: usize = 120;
+        for i in 0..N {
+            let p = dir.join(format!("{i}.png"));
+            std::fs::copy(&seed, &p).unwrap();
+            conn.execute(
+                "INSERT INTO assets (id, media_type, original_path) VALUES (?1, 'image', ?2)",
+                rusqlite::params![format!("a{i}"), p.display().to_string()],
+            )
+            .unwrap();
+        }
+        let db = Mutex::new(conn);
+        let ctl = Arc::new(MediaControl::default());
+        assert!(ctl.try_start());
+        let done = AtomicBool::new(false);
+
+        let summary = std::thread::scope(|s| {
+            let h = s.spawn(|| {
+                let r = process_pending_media(&db, &dir, &PerformanceSettings::default(), &ctl, &|_, _, _| {});
+                done.store(true, Ordering::SeqCst);
+                r
+            });
+            let wait_until = |f: &dyn Fn() -> bool| {
+                let t = std::time::Instant::now();
+                while !f() && t.elapsed().as_secs() < 30 {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            };
+            wait_until(&|| ctl.counts().0 >= 3);
+            ctl.pause().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(500)); // let in-flight assets drain
+            let at_pause = ctl.counts().0;
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            assert_eq!(ctl.counts().0, at_pause, "progress advanced while paused");
+            assert!(!done.load(Ordering::SeqCst));
+            ctl.resume().unwrap();
+            wait_until(&|| ctl.counts().0 > at_pause);
+            assert!(ctl.counts().0 > at_pause, "no progress after resume");
+            ctl.pause().unwrap();
+            ctl.cancel().unwrap(); // cancel while paused must wake the workers
+            h.join().unwrap().unwrap()
+        });
+        assert!(summary.cancelled);
+        let conn = db.lock().unwrap();
+        let done_n: i64 = conn.query_row("SELECT COUNT(*) FROM assets WHERE thumbnail_path IS NOT NULL", [], |r| r.get(0)).unwrap();
+        let failed: i64 = conn.query_row("SELECT COUNT(*) FROM assets WHERE thumb_failed = 1", [], |r| r.get(0)).unwrap();
+        assert!((done_n as usize) < N, "cancel did not leave assets pending");
+        assert_eq!(done_n as usize, summary.generated);
+        assert_eq!(failed, 0);
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -993,7 +1739,7 @@ mod tests {
             needs_playback: true,
         };
 
-        let result = ensure_playback_copy(&asset, &PerformanceSettings::default()).unwrap();
+        let result = ensure_playback_copy(&asset, &PerformanceSettings::default(), false).unwrap();
         let final_path = result.expect("mpeg4 input should need a playback-safe transcode");
 
         // Transcoded in place: same path, no second file, content replaced.
@@ -1024,7 +1770,7 @@ mod tests {
             needs_playback: true,
         };
 
-        let result = ensure_playback_copy(&asset, &PerformanceSettings::default()).unwrap();
+        let result = ensure_playback_copy(&asset, &PerformanceSettings::default(), false).unwrap();
         let final_path = result.expect("should fold the side-by-side copy in");
 
         assert_eq!(final_path, original_path);
@@ -1032,6 +1778,122 @@ mod tests {
         assert_eq!(std::fs::read(&original_path).unwrap(), b"already-converted h264 bytes");
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn choose_encoder_matrix() {
+        use HwEncoder::*;
+        let none = |_| false;
+        let all = |_| true;
+        let only_qsv = |e| e == Qsv;
+        assert_eq!(choose_encoder(HwAccel::Off, all), None);
+        assert_eq!(choose_encoder(HwAccel::Auto, all), Some(Nvenc));
+        assert_eq!(choose_encoder(HwAccel::Auto, only_qsv), Some(Qsv));
+        assert_eq!(choose_encoder(HwAccel::Auto, none), None);
+        assert_eq!(choose_encoder(HwAccel::Amf, all), Some(Amf));
+        assert_eq!(choose_encoder(HwAccel::Amf, only_qsv), None);
+        assert_eq!(choose_encoder(HwAccel::Qsv, only_qsv), Some(Qsv));
+        assert_eq!(choose_encoder(HwAccel::Nvenc, none), None);
+    }
+
+    /// Fixture in a fresh dir plus a DB with one video row; None if ffmpeg/the codec is missing.
+    fn video_fixture(codec_args: &[&str], ext: &str) -> Option<(PathBuf, Mutex<Connection>)> {
+        let dir = std::env::temp_dir().join(format!("snapvault-onopen-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(format!("v.{ext}"));
+        let ok = Command::new("ffmpeg")
+            .args(["-y", "-f", "lavfi", "-i", "color=c=blue:s=64x64:d=1"])
+            .args(codec_args)
+            .arg(&p)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !ok {
+            eprintln!("ffmpeg/codec missing, skipping");
+            let _ = std::fs::remove_dir_all(&dir);
+            return None;
+        }
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        conn.execute(
+            "INSERT INTO assets (id, media_type, original_path, thumbnail_path) VALUES ('v', 'video', ?1, 't.webp')",
+            [p.display().to_string()],
+        )
+        .unwrap();
+        Some((dir, Mutex::new(conn)))
+    }
+
+    #[test]
+    fn ensure_playback_returns_immediately_for_safe_mp4() {
+        let Some((dir, db)) = video_fixture(&["-c:v", "libx264", "-pix_fmt", "yuv420p"], "mp4") else { return };
+        let info = ensure_playback_for(&db, &dir, &PerformanceSettings::default(), "v").unwrap();
+        assert!(!info.converted);
+        assert!(info.path.ends_with("v.mp4"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ensure_playback_converts_hevc_and_coalesces() {
+        let Some((dir, db)) = video_fixture(&["-c:v", "libx265", "-pix_fmt", "yuv420p"], "mp4") else { return };
+        let s = PerformanceSettings::default();
+        let (a, b) = std::thread::scope(|sc| {
+            let h1 = sc.spawn(|| ensure_playback_for(&db, &dir, &s, "v"));
+            let h2 = sc.spawn(|| ensure_playback_for(&db, &dir, &s, "v"));
+            (h1.join().unwrap().unwrap(), h2.join().unwrap().unwrap())
+        });
+        assert_eq!(a.path, b.path);
+        assert!(a.converted || b.converted);
+        assert!(lock(&INFLIGHT).is_empty());
+        let stored: String = db.lock().unwrap().query_row("SELECT playback_path FROM assets WHERE id='v'", [], |r| r.get(0)).unwrap();
+        assert_eq!(stored, "v.mp4");
+        assert!(!needs_playback_transcode(Path::new(&a.path)).unwrap());
+        // Already converted: immediate, not converted again.
+        assert!(!ensure_playback_for(&db, &dir, &s, "v").unwrap().converted);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn on_open_background_run_skips_transcodes_and_leaves_pending() {
+        let Some((dir, db)) = video_fixture(&["-c:v", "mpeg4", "-pix_fmt", "yuv420p"], "mp4") else { return };
+        let s = PerformanceSettings { transcode_mode: TranscodeMode::OnOpen, ..Default::default() };
+        let summary = process_pending_media(&db, &dir, &s, &Arc::new(MediaControl::default()), &|_, _, _| {}).unwrap();
+        assert_eq!((summary.total, summary.playback_transcoded, summary.playback_failed), (0, 0, 0));
+        let pb: Option<String> = db.lock().unwrap().query_row("SELECT playback_path FROM assets WHERE id='v'", [], |r| r.get(0)).unwrap();
+        assert!(pb.is_none());
+        assert!(needs_playback_transcode(&dir.join("v.mp4")).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn inflight_guard_cleans_up_when_leader_panics() {
+        let slot: Inflight = Arc::new((Mutex::new(None), Condvar::new()));
+        lock(&INFLIGHT).insert("panic-id".into(), slot.clone());
+        let s2 = slot.clone();
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _g = InflightGuard { id: "panic-id", slot: &s2 };
+            panic!("boom");
+        }));
+        assert!(r.is_err());
+        assert!(!lock(&INFLIGHT).contains_key("panic-id"));
+        assert!(matches!(&*lock(&slot.0), Some(Err(_))));
+    }
+
+    #[test]
+    fn hw_cache_is_readable_while_detecting_and_latch_forces_libx264() {
+        let s = PerformanceSettings { hw_accel: HwAccel::Nvenc, ..Default::default() };
+        let prev = std::mem::replace(&mut *lock(&HW_STATE.0), HwState::Detecting);
+        let t = std::time::Instant::now();
+        assert!(cached_hw_encoders().is_none());
+        assert_eq!(select_encoder(&s), None);
+        assert!(t.elapsed() < std::time::Duration::from_secs(1));
+        *lock(&HW_STATE.0) = prev;
+
+        *lock(&HW_STATE.0) = HwState::Ready(vec![HwEncoderInfo { id: "nvenc".into(), label: String::new(), available: true, works: true }]);
+        assert_eq!(select_encoder(&s), Some(HwEncoder::Nvenc));
+        HW_BROKEN.store(true, Ordering::SeqCst);
+        assert_eq!(select_encoder(&s), None);
+        HW_BROKEN.store(false, Ordering::SeqCst);
+        *lock(&HW_STATE.0) = HwState::Unknown;
     }
 
     #[test]
@@ -1045,7 +1907,7 @@ mod tests {
             needs_thumbnail: false,
             needs_playback: true,
         };
-        let err = ensure_playback_copy(&asset, &PerformanceSettings::default()).unwrap_err();
+        let err = ensure_playback_copy(&asset, &PerformanceSettings::default(), false).unwrap_err();
         assert!(err.contains("source file missing"));
     }
 }

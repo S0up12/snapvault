@@ -55,7 +55,10 @@ export type IngestionSummary = {
 
 type ThumbnailProgressEvent =
   | { status: "progress"; processed: number; total: number; percent: number; message: string }
+  | { status: "paused"; processed: number; total: number }
+  | { status: "resumed"; processed: number; total: number }
   | { status: "completed"; summary: ThumbnailSummary }
+  | { status: "cancelled"; summary: ThumbnailSummary }
   | { status: "error"; message: string };
 
 export type ThumbnailSummary = {
@@ -64,9 +67,12 @@ export type ThumbnailSummary = {
   failed: number;
   playback_transcoded: number;
   playback_failed: number;
+  cancelled?: boolean;
 };
 
-export type JobStatus = "idle" | "running" | "completed" | "error";
+export type MediaState = "idle" | "running" | "paused" | "cancelling";
+
+export type JobStatus = "idle" | "running" | "paused" | "cancelled" | "completed" | "error";
 
 export type IngestionState = {
   status: JobStatus;
@@ -82,11 +88,18 @@ export type ThumbnailState = {
   status: JobStatus;
   message: string;
   percent: number;
+  processed: number;
+  total: number;
   summary: ThumbnailSummary | null;
   error: string | null;
 };
 
-type Store = { ingestion: IngestionState; thumbnails: ThumbnailState; backendBusy: boolean };
+type Store = {
+  ingestion: IngestionState;
+  thumbnails: ThumbnailState;
+  backendBusy: boolean;
+  mediaState: MediaState;
+};
 
 const idleIngestion: IngestionState = {
   status: "idle",
@@ -101,11 +114,18 @@ const idleThumbnails: ThumbnailState = {
   status: "idle",
   message: "",
   percent: 0,
+  processed: 0,
+  total: 0,
   summary: null,
   error: null,
 };
 
-let state: Store = { ingestion: idleIngestion, thumbnails: idleThumbnails, backendBusy: false };
+let state: Store = {
+  ingestion: idleIngestion,
+  thumbnails: idleThumbnails,
+  backendBusy: false,
+  mediaState: "idle",
+};
 const listeners = new Set<() => void>();
 
 function subscribe(cb: () => void): () => void {
@@ -124,9 +144,9 @@ function setThumbnails(patch: Partial<ThumbnailState>): void {
 
 async function refreshBusy(): Promise<void> {
   try {
-    const busy = await invokeLogged<boolean>("get_media_activity");
-    if (busy !== state.backendBusy) {
-      state = { ...state, backendBusy: busy };
+    const m = await invokeLogged<{ state: MediaState; busy: boolean }>("get_media_state");
+    if (m.busy !== state.backendBusy || m.state !== state.mediaState) {
+      state = { ...state, backendBusy: m.busy, mediaState: m.state };
       listeners.forEach((l) => l());
     }
   } catch {
@@ -169,7 +189,23 @@ export function initJobStore(): void {
     const p = event.payload;
     if (p.status === "progress") {
       // Also covers runs this window did not start (startup resume, window reload).
-      setThumbnails({ message: p.message, percent: p.percent, status: "running" });
+      setThumbnails({
+        message: p.message,
+        percent: p.percent,
+        processed: p.processed,
+        total: p.total,
+        // In-flight files still report after Pause; stay paused until "resumed".
+        status: state.thumbnails.status === "paused" ? "paused" : "running",
+      });
+    } else if (p.status === "paused") {
+      setThumbnails({ processed: p.processed, total: p.total, status: "paused" });
+      void refreshBusy();
+    } else if (p.status === "resumed") {
+      setThumbnails({ processed: p.processed, total: p.total, status: "running" });
+      void refreshBusy();
+    } else if (p.status === "cancelled") {
+      setThumbnails({ summary: p.summary, status: "cancelled" });
+      void refreshBusy();
     } else if (p.status === "completed") {
       setThumbnails({ summary: p.summary, percent: 100, status: "completed" });
       void refreshBusy();
@@ -183,6 +219,24 @@ export function initJobStore(): void {
   window.addEventListener("focus", () => void refreshBusy());
   setInterval(() => void refreshBusy(), 5000);
 }
+
+// Optimistic mediaState; reconciled from get_media_state afterwards. Invalid
+// transitions are rejected by the backend and just resync quietly.
+async function mediaCommand(command: string, optimistic: MediaState): Promise<void> {
+  const previous = state.mediaState;
+  state = { ...state, mediaState: optimistic };
+  listeners.forEach((l) => l());
+  try {
+    await invokeLogged(command);
+  } catch {
+    state = { ...state, mediaState: previous };
+    listeners.forEach((l) => l());
+  }
+  void refreshBusy();
+}
+export const pauseMedia = () => mediaCommand("pause_media_processing", "paused");
+export const resumeMedia = () => mediaCommand("resume_media_processing", "running");
+export const cancelMedia = () => mediaCommand("cancel_media_processing", "cancelling");
 
 export async function startIngestion(archivePaths: string[]): Promise<void> {
   setIngestion({
@@ -210,7 +264,8 @@ export async function startThumbnails(): Promise<void> {
   setThumbnails({ ...idleThumbnails, status: "running", message: "Starting..." });
   try {
     const result = await invokeLogged<ThumbnailSummary>("generate_thumbnails");
-    setThumbnails({ summary: result, percent: 100, status: "completed" });
+    if (result.cancelled) setThumbnails({ summary: result, status: "cancelled" });
+    else setThumbnails({ summary: result, percent: 100, status: "completed" });
   } catch (err) {
     // Backend already busy (e.g. startup resume): not an error, the busy banner covers it.
     if (String(err).includes("already running")) setThumbnails({ ...idleThumbnails });
@@ -219,14 +274,16 @@ export async function startThumbnails(): Promise<void> {
   void refreshBusy();
 }
 
-export function useIngestionJob(): IngestionState & { backendBusy: boolean } {
+export function useIngestionJob(): IngestionState & { backendBusy: boolean; mediaState: MediaState } {
   const ingestion = useSyncExternalStore(subscribe, () => state.ingestion);
   const backendBusy = useSyncExternalStore(subscribe, () => state.backendBusy);
-  return { ...ingestion, backendBusy };
+  const mediaState = useSyncExternalStore(subscribe, () => state.mediaState);
+  return { ...ingestion, backendBusy, mediaState };
 }
 
-export function useThumbnailJob(): ThumbnailState & { backendBusy: boolean } {
+export function useThumbnailJob(): ThumbnailState & { backendBusy: boolean; mediaState: MediaState } {
   const thumbnails = useSyncExternalStore(subscribe, () => state.thumbnails);
   const backendBusy = useSyncExternalStore(subscribe, () => state.backendBusy);
-  return { ...thumbnails, backendBusy };
+  const mediaState = useSyncExternalStore(subscribe, () => state.mediaState);
+  return { ...thumbnails, backendBusy, mediaState };
 }
