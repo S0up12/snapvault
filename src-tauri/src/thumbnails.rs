@@ -348,6 +348,23 @@ impl MediaSlot {
         let taken = app.state::<MediaProcessingState>().0.swap(true, Ordering::SeqCst);
         (!taken).then(|| MediaSlot(app.clone()))
     }
+
+    /// Non-acquiring: true while any slot is held.
+    pub(crate) fn is_busy(app: &AppHandle) -> bool {
+        app.state::<MediaProcessingState>().is_busy()
+    }
+}
+
+impl MediaProcessingState {
+    fn is_busy(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+/// True while an import's media phase or a thumbnail run holds the slot.
+#[tauri::command]
+pub fn get_media_activity(app: AppHandle) -> Result<bool, String> {
+    Ok(MediaSlot::is_busy(&app))
 }
 
 /// Polls up to 1 hour, then gives up with Err.
@@ -766,6 +783,17 @@ fn run_thumbnail_ffmpeg(
 mod tests {
     use super::*;
     use crate::db::schema::SCHEMA_SQL;
+
+    #[test]
+    fn busy_flag_tracks_slot_state() {
+        // ponytail: tests the state the guard flips; AppHandle<Wry> can't be mocked here.
+        let s = MediaProcessingState::default();
+        assert!(!s.is_busy());
+        s.0.store(true, Ordering::SeqCst);
+        assert!(s.is_busy());
+        s.0.store(false, Ordering::SeqCst);
+        assert!(!s.is_busy());
+    }
 
     #[test]
     fn load_pending_assets_excludes_audio_and_already_thumbnailed() {

@@ -12,7 +12,7 @@ Stack: Tauri v2, Rust backend (`src-tauri/src`), React+TS+Tailwind frontend (`sr
 - `chats.rs`, `profile.rs`, `maintenance.rs` (stats/verify/reset), `settings.rs` (performance + viewer), `storage.rs` (media root)
 
 ## Commands
-run_ingestion, generate_thumbnails, list_memory_assets, list_memory_tags, list_memory_years, memory_year_offset, set_asset_favorite, set_asset_tags, list_chat_threads, list_chat_messages, get_profile_snapshot, get_library_stats, verify_library, reset_library, get_storage_info, set_media_root, get/set_performance_settings, get/set_viewer_settings, log_frontend (+ greet, count_assets, db_table_names scaffolding)
+run_ingestion, generate_thumbnails, list_memory_assets, list_memory_tags, list_memory_years, memory_year_offset, set_asset_favorite, set_asset_tags, list_chat_threads, list_chat_messages, get_profile_snapshot, get_library_stats, verify_library, reset_library, get_storage_info, set_media_root, get/set_performance_settings, get/set_viewer_settings, get_media_activity, log_frontend (+ greet, count_assets, db_table_names scaffolding)
 
 ## DB tables
 assets, ingestion_jobs, profile_snapshots, chat_threads, chat_messages, chat_message_assets, memory_collections, memory_items, story_collections, story_items

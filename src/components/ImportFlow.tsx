@@ -1,51 +1,12 @@
 import { invokeLogged } from "../lib/ipc";
-import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AlertCircle, CheckCircle2, Circle, FolderOpen, Loader2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import Stat from "./Stat";
 import StorageChoiceModal from "./StorageChoiceModal";
 import type { StorageInfo } from "../hooks/useStorageSettings";
-
-type Phase = "extracting" | "parsing" | "parsing_chats" | "parsing_profile" | "processing_media";
-
-type ProgressEvent =
-  | {
-      status: "progress";
-      job_id: string;
-      phase: Phase;
-      message: string;
-      processed: number;
-      total: number;
-      percent: number;
-    }
-  | { status: "completed"; job_id: string; summary: IngestionSummary }
-  | { status: "error"; job_id: string; phase: string; message: string };
-
-type IngestionSummary = {
-  job_id: string;
-  destination: string;
-  extracted_entries: number;
-  skipped_entries: number;
-  json_items: number;
-  files_found: number;
-  matched: number;
-  unmatched_files: number;
-  assets_inserted: number;
-  memory_items_inserted: number;
-  files_timestamp_repaired: number;
-  chat_threads_inserted: number;
-  chat_messages_inserted: number;
-  chat_media_assets_linked: number;
-  profile_found: boolean;
-  thumbnails_generated: number;
-  thumbnails_failed: number;
-  playback_transcoded: number;
-  playback_failed: number;
-};
-
-type Status = "idle" | "running" | "completed" | "error";
+import { startIngestion, useIngestionJob, type Phase } from "../lib/jobStore";
 
 const STEPS: { key: Phase; label: string }[] = [
   { key: "extracting", label: "Extracting files" },
@@ -56,42 +17,10 @@ const STEPS: { key: Phase; label: string }[] = [
 ];
 
 export default function ImportFlow() {
-  const [status, setStatus] = useState<Status>("idle");
-  const [activePhase, setActivePhase] = useState<Phase | null>(null);
-  const [phaseMessage, setPhaseMessage] = useState("");
-  const [phasePercent, setPhasePercent] = useState(0);
-  const [donePhases, setDonePhases] = useState<Set<Phase>>(new Set());
-  const [summary, setSummary] = useState<IngestionSummary | null>(null);
-  const [error, setError] = useState<{ phase: string; message: string } | null>(null);
+  const { status, activePhase, phaseMessage, phasePercent, donePhases, summary, error, backendBusy } =
+    useIngestionJob();
   const [storageChoice, setStorageChoice] = useState<{ defaultPath: string } | null>(null);
-  const activePhaseRef = useRef<Phase | null>(null);
-
-  useEffect(() => {
-    const unlisten = listen<ProgressEvent>("ingestion://progress", (event) => {
-      const payload = event.payload;
-      if (payload.status === "progress") {
-        const previous = activePhaseRef.current;
-        if (previous && previous !== payload.phase) {
-          setDonePhases((done) => new Set(done).add(previous));
-        }
-        activePhaseRef.current = payload.phase;
-        setActivePhase(payload.phase);
-        setPhaseMessage(payload.message);
-        setPhasePercent(payload.percent);
-      } else if (payload.status === "completed") {
-        setDonePhases(new Set(STEPS.map((step) => step.key)));
-        setSummary(payload.summary);
-        setStatus("completed");
-      } else if (payload.status === "error") {
-        setError({ phase: payload.phase, message: payload.message });
-        setStatus("error");
-      }
-    });
-
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
+  const busy = status === "running" || backendBusy;
 
   async function handleSelectFile() {
     const storageInfo = await invokeLogged<StorageInfo>("get_storage_info");
@@ -114,24 +43,7 @@ export default function ImportFlow() {
     }
     const archivePaths = Array.isArray(selected) ? selected : [selected];
 
-    activePhaseRef.current = null;
-    setStatus("running");
-    setActivePhase(null);
-    setPhaseMessage("Starting...");
-    setPhasePercent(0);
-    setDonePhases(new Set());
-    setSummary(null);
-    setError(null);
-
-    try {
-      const result = await invokeLogged<IngestionSummary>("run_ingestion", { archivePaths });
-      setSummary(result);
-      setDonePhases(new Set(STEPS.map((step) => step.key)));
-      setStatus("completed");
-    } catch (err) {
-      setStatus("error");
-      setError((prev) => prev ?? { phase: activePhaseRef.current ?? "ingestion", message: String(err) });
-    }
+    void startIngestion(archivePaths);
   }
 
   return (
@@ -146,7 +58,7 @@ export default function ImportFlow() {
       <button
         type="button"
         onClick={handleSelectFile}
-        disabled={status === "running"}
+        disabled={busy}
         className="btn btn-primary mt-4 disabled:cursor-not-allowed"
       >
         {status === "running" ? (
@@ -156,6 +68,10 @@ export default function ImportFlow() {
         )}
         {status === "running" ? "Importing..." : "Select Snapchat export (.zip)"}
       </button>
+
+      {backendBusy && status !== "running" ? (
+        <p className="mt-3 text-xs text-neutral-400">Media processing is running in the background</p>
+      ) : null}
 
       {status === "running" || status === "completed" || status === "error" ? (
         <div className="mt-6 flex flex-col gap-2">

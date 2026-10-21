@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "createdAt": "2026-10-21T12:51:42.507Z",
+        "reason": "Nocturne design system (redesign/_ds/*/readme.md) specifies Inter for headings and body; not user-confirmed in chat, decided from the project's design reference"
+      }
+    ]
+  }
+}

@@ -1,70 +1,11 @@
-import { invokeLogged } from "../lib/ipc";
-import { listen } from "@tauri-apps/api/event";
 import { AlertCircle, CheckCircle2, ImageIcon, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
 
 import Stat from "./Stat";
-
-type ProgressEvent =
-  | { status: "progress"; processed: number; total: number; percent: number; message: string }
-  | { status: "completed"; summary: ThumbnailSummary }
-  | { status: "error"; message: string };
-
-type ThumbnailSummary = {
-  total: number;
-  generated: number;
-  failed: number;
-  playback_transcoded: number;
-  playback_failed: number;
-};
-
-type Status = "idle" | "running" | "completed" | "error";
+import { startThumbnails, useThumbnailJob } from "../lib/jobStore";
 
 export default function ThumbnailGenerator() {
-  const [status, setStatus] = useState<Status>("idle");
-  const [message, setMessage] = useState("");
-  const [percent, setPercent] = useState(0);
-  const [summary, setSummary] = useState<ThumbnailSummary | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const unlisten = listen<ProgressEvent>("thumbnails://progress", (event) => {
-      const payload = event.payload;
-      if (payload.status === "progress") {
-        setMessage(payload.message);
-        setPercent(payload.percent);
-      } else if (payload.status === "completed") {
-        setSummary(payload.summary);
-        setPercent(100);
-        setStatus("completed");
-      } else if (payload.status === "error") {
-        setError(payload.message);
-        setStatus("error");
-      }
-    });
-
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
-
-  async function handleGenerate() {
-    setStatus("running");
-    setMessage("Starting...");
-    setPercent(0);
-    setSummary(null);
-    setError(null);
-
-    try {
-      const result = await invokeLogged<ThumbnailSummary>("generate_thumbnails");
-      setSummary(result);
-      setPercent(100);
-      setStatus("completed");
-    } catch (err) {
-      setStatus("error");
-      setError(String(err));
-    }
-  }
+  const { status, message, percent, summary, error, backendBusy } = useThumbnailJob();
+  const busy = status === "running" || backendBusy;
 
   return (
     <div className="rounded-lg bg-surface p-6 ring-1 ring-divider">
@@ -77,8 +18,8 @@ export default function ThumbnailGenerator() {
 
       <button
         type="button"
-        onClick={handleGenerate}
-        disabled={status === "running"}
+        onClick={() => void startThumbnails()}
+        disabled={busy}
         className="btn btn-primary mt-4 disabled:cursor-not-allowed"
       >
         {status === "running" ? (
@@ -88,6 +29,10 @@ export default function ThumbnailGenerator() {
         )}
         {status === "running" ? "Processing..." : "Reprocess media"}
       </button>
+
+      {backendBusy && status !== "running" ? (
+        <p className="mt-3 text-xs text-neutral-400">Media processing is running in the background</p>
+      ) : null}
 
       {status === "running" ? (
         <div className="mt-5">
