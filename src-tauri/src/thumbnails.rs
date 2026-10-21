@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 #[cfg(windows)]
@@ -159,116 +159,172 @@ pub(crate) fn process_pending_media(
     // to ~200 regardless of library size.
     let emit_step = (total / 200).max(1);
 
-    let mut generated = 0usize;
-    let mut failed = 0usize;
-    let mut playback_transcoded = 0usize;
-    let mut playback_failed = 0usize;
-    for (index, asset) in pending.iter().enumerate() {
-        // Snapchat voice notes are exported as audio-only .mp4 containers,
-        // which `media_type_for_extension` classifies as `video` since it
-        // only looks at the extension - there's no video stream for ffmpeg
-        // to grab a frame from or transcode. Reclassify on sight instead of
-        // retrying a doomed thumbnail/transcode every single run. A probe
-        // error defaults to "has video" so a flaky ffprobe call doesn't
-        // wrongly reclassify a real video.
-        if asset.media_type == "video"
-            && (asset.needs_thumbnail || asset.needs_playback)
-            && !has_video_stream(Path::new(&asset.original_path)).unwrap_or(true)
-        {
-            let conn = db.lock().map_err(|err| err.to_string())?;
-            conn.execute(
-                "UPDATE assets SET media_type = 'audio' WHERE id = ?1",
-                rusqlite::params![asset.id],
-            )
-            .map_err(|err| format!("failed to reclassify asset {}: {err}", asset.id))?;
-            drop(conn);
+    // Workers do the slow ffprobe/ffmpeg work with no DB access and send the
+    // resulting DB ops here; this thread batches them into transactions and
+    // emits progress, so `processed` is a monotonic completion count.
+    let next = AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+    let (tx, rx) = std::sync::mpsc::channel::<(String, Vec<Op>)>();
+    let workers = settings.media_workers().min(total);
+    let mut summary = ThumbnailSummary { total, generated: 0, failed: 0, playback_transcoded: 0, playback_failed: 0 };
+    let mut batch: Vec<(String, Vec<Op>)> = Vec::new();
+    let mut db_err: Option<String> = None;
+    let mut processed = 0usize;
 
-            let processed = index + 1;
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            let tx = tx.clone();
+            let (next, stop, pending, thumbnail_dir) = (&next, &stop, &pending, &thumbnail_dir);
+            scope.spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(asset) = pending.get(i) else { break };
+                    let ops = process_one(asset, thumbnail_dir, settings);
+                    if tx.send((asset.id.clone(), ops)).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(tx);
+
+        for (id, ops) in rx {
+            for op in &ops {
+                match op {
+                    Op::Thumb(_) => summary.generated += 1,
+                    Op::ThumbFailed | Op::ThumbSpawnFailed => summary.failed += 1,
+                    Op::Playback { .. } => summary.playback_transcoded += 1,
+                    Op::PlaybackFailed => summary.playback_failed += 1,
+                    Op::Audio => {}
+                }
+            }
+            batch.push((id, ops));
+            processed += 1;
+            if batch.len() >= DB_BATCH && db_err.is_none() {
+                if let Err(err) = flush_ops(db, &mut batch) {
+                    db_err = Some(err);
+                    stop.store(true, Ordering::Relaxed);
+                }
+            }
             if processed % emit_step == 0 || processed == total {
                 emit(processed, total, format!("Processing media {processed}/{total}"));
             }
-            continue;
         }
+    });
+    if db_err.is_none() {
+        if let Err(err) = flush_ops(db, &mut batch) {
+            db_err = Some(err);
+        }
+    }
+    match db_err {
+        Some(err) => Err(err),
+        None => Ok(summary),
+    }
+}
 
-        if asset.needs_thumbnail {
-            let output_path = thumbnail_dir.join(format!("{}.webp", asset.id));
-            match generate_one_thumbnail(asset, &output_path, settings) {
-                Ok(()) => {
-                    let conn = db.lock().map_err(|err| err.to_string())?;
-                    conn.execute(
-                        "UPDATE assets SET thumbnail_path = ?1, thumb_failed = NULL WHERE id = ?2",
-                        rusqlite::params![output_path.display().to_string(), asset.id],
-                    )
-                    .map_err(|err| {
-                        format!("failed to update thumbnail_path for {}: {err}", asset.id)
-                    })?;
-                    generated += 1;
-                }
-                Err(err) => {
-                    eprintln!("[thumbnails] failed for asset {}: {err}", asset.id);
-                    // Mark so startup auto-resume doesn't retry forever;
-                    // manual generate_thumbnails clears the marker. A spawn
-                    // failure (ffmpeg missing) isn't a per-asset failure.
-                    if err.contains("failed to run ffmpeg") {
-                    } else if let Ok(conn) = db.lock() {
-                        let _ = conn.execute(
-                            "UPDATE assets SET thumb_failed = 1 WHERE id = ?1",
-                            rusqlite::params![asset.id],
-                        );
-                    }
-                    failed += 1;
-                }
+const DB_BATCH: usize = 50;
+static TRANSCODE_GATE: Mutex<()> = Mutex::new(());
+
+enum Op {
+    Audio,
+    Thumb(String),
+    ThumbFailed,
+    /// ffmpeg couldn't be spawned: counts as failed but isn't marked in the DB.
+    ThumbSpawnFailed,
+    Playback { final_path: String, old_path: String },
+    PlaybackFailed,
+}
+
+/// Slow, DB-free work for one asset (ffprobe + ffmpeg); never aborts the run.
+fn process_one(asset: &PendingAsset, thumbnail_dir: &Path, settings: &PerformanceSettings) -> Vec<Op> {
+    let mut ops = Vec::new();
+    // Snapchat voice notes are exported as audio-only .mp4 containers,
+    // which `media_type_for_extension` classifies as `video` since it
+    // only looks at the extension - there's no video stream for ffmpeg
+    // to grab a frame from or transcode. Reclassify on sight instead of
+    // retrying a doomed thumbnail/transcode every single run. A probe
+    // error defaults to "has video" so a flaky ffprobe call doesn't
+    // wrongly reclassify a real video.
+    if asset.media_type == "video"
+        && (asset.needs_thumbnail || asset.needs_playback)
+        && !has_video_stream(Path::new(&asset.original_path)).unwrap_or(true)
+    {
+        ops.push(Op::Audio);
+        return ops;
+    }
+
+    if asset.needs_thumbnail {
+        let output_path = thumbnail_dir.join(format!("{}.webp", asset.id));
+        match generate_one_thumbnail(asset, &output_path, settings) {
+            Ok(()) => ops.push(Op::Thumb(output_path.display().to_string())),
+            Err(err) => {
+                eprintln!("[thumbnails] failed for asset {}: {err}", asset.id);
+                // Marked so startup auto-resume doesn't retry forever; manual
+                // generate_thumbnails clears the marker. A spawn failure
+                // (ffmpeg missing) isn't a per-asset failure.
+                ops.push(if err.contains("failed to run ffmpeg") { Op::ThumbSpawnFailed } else { Op::ThumbFailed });
             }
-        }
-
-        if asset.needs_playback {
-            match ensure_playback_copy(asset, settings) {
-                Ok(Some(final_path)) => {
-                    let final_path = final_path.display().to_string();
-                    let conn = db.lock().map_err(|err| err.to_string())?;
-                    let result = if final_path == asset.original_path {
-                        conn.execute(
-                            "UPDATE assets SET playback_path = ?1 WHERE id = ?2",
-                            rusqlite::params![final_path, asset.id],
-                        )
-                    } else {
-                        // Extension had to change (source wasn't .mp4/.m4v) -
-                        // original_path now points at a renamed file too.
-                        conn.execute(
-                            "UPDATE assets SET original_path = ?1, playback_path = ?1 WHERE id = ?2",
-                            rusqlite::params![final_path, asset.id],
-                        )
-                    };
-                    result.map_err(|err| format!("failed to update playback_path for {}: {err}", asset.id))?;
-                    if final_path != asset.original_path {
-                        // DB now points at the new file; safe to drop the old one.
-                        let _ = std::fs::remove_file(&asset.original_path);
-                    }
-                    playback_transcoded += 1;
-                }
-                Ok(None) => {
-                    // Already browser-safe (e.g. plain H.264/AAC mp4) - nothing to store.
-                }
-                Err(err) => {
-                    eprintln!("[thumbnails] playback transcode failed for asset {}: {err}", asset.id);
-                    playback_failed += 1;
-                }
-            }
-        }
-
-        let processed = index + 1;
-        if processed % emit_step == 0 || processed == total {
-            emit(processed, total, format!("Processing media {processed}/{total}"));
         }
     }
 
-    Ok(ThumbnailSummary {
-        total,
-        generated,
-        failed,
-        playback_transcoded,
-        playback_failed,
-    })
+    if asset.needs_playback {
+        match ensure_playback_copy(asset, settings) {
+            Ok(Some(final_path)) => ops.push(Op::Playback {
+                final_path: final_path.display().to_string(),
+                old_path: asset.original_path.clone(),
+            }),
+            Ok(None) => {} // already browser-safe
+            Err(err) => {
+                eprintln!("[thumbnails] playback transcode failed for asset {}: {err}", asset.id);
+                ops.push(Op::PlaybackFailed);
+            }
+        }
+    }
+    ops
+}
+
+/// Applies buffered ops in one transaction. Old originals are deleted only
+/// after commit so the DB never points at a removed file.
+fn flush_ops(db: &Mutex<Connection>, batch: &mut Vec<(String, Vec<Op>)>) -> Result<(), String> {
+    if batch.is_empty() {
+        return Ok(());
+    }
+    let mut conn = db.lock().map_err(|err| err.to_string())?;
+    let tx = conn.transaction().map_err(|err| format!("failed to begin media batch: {err}"))?;
+    let mut stale = Vec::new();
+    for (id, ops) in batch.iter() {
+        for op in ops {
+            let r = match op {
+                Op::Audio => tx.execute("UPDATE assets SET media_type = 'audio' WHERE id = ?1", [id]),
+                Op::Thumb(path) => tx.execute(
+                    "UPDATE assets SET thumbnail_path = ?1, thumb_failed = NULL WHERE id = ?2",
+                    rusqlite::params![path, id],
+                ),
+                Op::ThumbFailed => tx.execute("UPDATE assets SET thumb_failed = 1 WHERE id = ?1", [id]),
+                Op::Playback { final_path, old_path } if final_path == old_path => tx.execute(
+                    "UPDATE assets SET playback_path = ?1 WHERE id = ?2",
+                    rusqlite::params![final_path, id],
+                ),
+                Op::Playback { final_path, old_path } => {
+                    // Extension changed (source wasn't .mp4/.m4v).
+                    stale.push(old_path.clone());
+                    tx.execute(
+                        "UPDATE assets SET original_path = ?1, playback_path = ?1 WHERE id = ?2",
+                        rusqlite::params![final_path, id],
+                    )
+                }
+                Op::ThumbSpawnFailed | Op::PlaybackFailed => Ok(0),
+            };
+            r.map_err(|err| format!("failed to update asset {id}: {err}"))?;
+        }
+    }
+    tx.commit().map_err(|err| format!("failed to commit media batch: {err}"))?;
+    drop(conn);
+    for path in stale {
+        let _ = std::fs::remove_file(path);
+    }
+    batch.clear();
+    Ok(())
 }
 
 /// Blocks (briefly polling) until no other `process_pending_media` run holds
@@ -516,13 +572,17 @@ fn ensure_playback_copy(asset: &PendingAsset, settings: &PerformanceSettings) ->
     if let Some(thread_cap) = settings.ffmpeg_thread_cap() {
         command.args(["-threads", &thread_cap.to_string()]);
     }
-    let output = command
+    command
         .args(["-movflags", "+faststart"])
         .args(["-c:a", "aac", "-b:a", "128k"])
-        .arg(&tmp_path)
+        .arg(&tmp_path);
+    // At most one transcode at a time regardless of worker count.
+    let gate = TRANSCODE_GATE.lock().unwrap_or_else(|e| e.into_inner());
+    let output = command
         .output()
         .map_err(|err| format!("failed to run ffmpeg (is it installed and on PATH?): {err}"))?;
 
+    drop(gate);
     if !output.status.success() {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(format!(
@@ -738,6 +798,68 @@ mod tests {
             pending.iter().find(|a| a.id == "vid").unwrap().media_type,
             "video"
         );
+    }
+
+    /// Bench: `cargo test bench_thumbnails -- --nocapture`. Skips without ffmpeg.
+    #[test]
+    fn bench_thumbnails() {
+        if check_ffmpeg().is_err() {
+            eprintln!("ffmpeg missing, skipping bench_thumbnails");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("snapvault-thumb-bench-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let seed = dir.join("seed.png");
+        let gen = Command::new("ffmpeg")
+            .args(["-y", "-f", "lavfi", "-i", "testsrc=s=640x480:d=1", "-frames:v", "1"])
+            .arg(&seed)
+            .output()
+            .unwrap();
+        assert!(gen.status.success());
+
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        const N: usize = 200;
+        for i in 0..N {
+            let p = dir.join(format!("{i}.png"));
+            std::fs::copy(&seed, &p).unwrap();
+            conn.execute(
+                "INSERT INTO assets (id, media_type, original_path) VALUES (?1, 'image', ?2)",
+                rusqlite::params![format!("a{i}"), p.display().to_string()],
+            )
+            .unwrap();
+        }
+        // One missing source: per-asset failure must not abort the run.
+        conn.execute(
+            "INSERT INTO assets (id, media_type, original_path) VALUES ('bad', 'image', ?1)",
+            rusqlite::params![dir.join("nope.png").display().to_string()],
+        )
+        .unwrap();
+        let db = Mutex::new(conn);
+
+        let last = std::sync::atomic::AtomicUsize::new(0);
+        let emit = |processed: usize, _t: usize, _m: String| {
+            assert!(processed >= last.swap(processed, Ordering::SeqCst), "progress not monotonic");
+        };
+        let start = std::time::Instant::now();
+        let summary = process_pending_media(&db, &dir, &PerformanceSettings::default(), &emit).unwrap();
+        let secs = start.elapsed().as_secs_f64();
+        eprintln!("bench_thumbnails: {} assets in {secs:.2}s = {:.1}/s", N + 1, (N + 1) as f64 / secs);
+
+        assert_eq!(summary.total, N + 1);
+        assert_eq!(summary.generated, N);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(last.load(Ordering::SeqCst), N + 1);
+        let conn = db.lock().unwrap();
+        let done: i64 = conn
+            .query_row("SELECT COUNT(*) FROM assets WHERE thumbnail_path IS NOT NULL", [], |r| r.get(0))
+            .unwrap();
+        let marked: i64 = conn
+            .query_row("SELECT COUNT(*) FROM assets WHERE thumb_failed = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!((done, marked), (N as i64, 1));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

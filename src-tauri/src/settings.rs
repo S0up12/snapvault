@@ -54,6 +54,16 @@ impl PerformanceSettings {
         let available = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
         Some((available / 2).max(1))
     }
+
+    /// Parallel thumbnail workers: 1 when CPU limiting is on (low-end), else
+    /// min(cores/2, 4).
+    pub fn media_workers(&self) -> usize {
+        if self.limit_cpu_usage {
+            return 1;
+        }
+        let available = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2);
+        (available / 2).clamp(1, 4)
+    }
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {

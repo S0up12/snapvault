@@ -11,3 +11,9 @@
 - favorite+year regressed 44 -> 64ms until adding index ix_assets_source_type_favorite_taken_at (source_type,is_favorite,taken_at) -> 1.9ms. Added via CREATE INDEX IF NOT EXISTS in SCHEMA_SQL.
 - list_memory_tags already skips tags='[]'; not changed (not measured as a bottleneck). count/page left separate.
 - Bench: `cargo test bench_year -- --nocapture`.
+
+## Perf: parallel thumbnails (thumbnails.rs process_pending_media)
+- Bench `cargo test bench_thumbnails -- --nocapture` (201 synthetic 640x480 PNGs, 1 missing, debug build): serial 20.1/s -> scoped worker pool 54.4/s (2.7x; machine default workers).
+- Design: `PerformanceSettings::media_workers()` = 1 if limit_cpu_usage else clamp(cores/2,1,4). Workers run `process_one` (ffprobe/ffmpeg, no DB) and send `Op`s over mpsc; coordinator thread batches into one transaction per 50 assets (+ final flush), emits progress as monotonic completion count. Old original deleted only after commit.
+- Risks: a DB flush error stops workers and returns Err (unflushed thumbs stay on disk, redone next run). Playback transcodes (libx264) now run N at a time with unrestricted ffmpeg threads -> more RAM/CPU on default settings; low-end users should enable limit_cpu_usage (1 worker, same as before).
+- Follow-up: static TRANSCODE_GATE mutex around the libx264 ffmpeg call in ensure_playback_copy keeps transcodes to one at a time; thumbnails/ffprobe stay parallel (supersedes the transcode risk above).
