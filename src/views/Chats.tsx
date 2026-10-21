@@ -1,7 +1,8 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Clapperboard, LoaderCircle, Play, Search, Users } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 
 import Lightbox, { type LightboxAsset } from "../components/Lightbox";
@@ -131,7 +132,7 @@ export default function Chats() {
 
       <div className="flex min-h-0 flex-1 flex-col">
         {selectedThread ? (
-          <MessagePane thread={selectedThread} />
+          <MessagePane key={selectedThread.id} thread={selectedThread} />
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-neutral-500">
             Select a conversation.
@@ -187,7 +188,7 @@ function ConversationRow({
 }
 
 function MessagePane({ thread }: { thread: ChatThread }) {
-  const { messages, isLoading, error } = useChatMessages(thread.id);
+  const { messages, isLoading, isLoadingOlder, error, hasMore, loadOlder } = useChatMessages(thread.id);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [openMediaId, setOpenMediaId] = useState<string | null>(null);
 
@@ -212,9 +213,73 @@ function MessagePane({ thread }: { thread: ChatThread }) {
   );
   const openIndex = openMediaId ? mediaAssets.findIndex((asset) => asset.id === openMediaId) : -1;
 
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  const virtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 90,
+    overscan: 8,
+    getItemKey: (index) => messages[index].id,
+  });
+  const virtualItems = virtualizer.getVirtualItems();
+  const firstVisible = virtualItems[0]?.index ?? 0;
+
+  const prev = useRef({ firstId: "", count: 0 });
+  const didInitialScroll = useRef(false);
+  const rafId = useRef(0);
+  const [ready, setReady] = useState(false);
+
+  // Re-issues a scrollToIndex every frame for up to ~1s (or until the user
+  // takes over) so it converges as rows get measured and estimates shrink/grow.
+  const pinScroll = (index: number, align: "start" | "end", onDone?: () => void) => {
+    cancelAnimationFrame(rafId.current);
+    const el = scrollRef.current;
+    const t0 = performance.now();
+    let stable = 0;
+    let interrupted = false;
+    const stop = () => {
+      interrupted = true;
+    };
+    el?.addEventListener("wheel", stop, { once: true });
+    el?.addEventListener("pointerdown", stop, { once: true });
+    const tick = () => {
+      if (interrupted || !el) return finish();
+      virtualizer.scrollToIndex(index, { align });
+      stable = el.scrollHeight === lastHeight ? stable + 1 : 0;
+      lastHeight = el.scrollHeight;
+      if (stable >= 10 || performance.now() - t0 > 1000) return finish();
+      rafId.current = requestAnimationFrame(tick);
+    };
+    let lastHeight = -1;
+    const finish = () => {
+      el?.removeEventListener("wheel", stop);
+      el?.removeEventListener("pointerdown", stop);
+      onDone?.();
+    };
+    tick();
+  };
+
+  useLayoutEffect(() => {
+    const p = prev.current;
+    if (messages.length > 0) {
+      if (!didInitialScroll.current) {
+        didInitialScroll.current = true;
+        pinScroll(messages.length - 1, "end", () => setReady(true));
+      } else if (messages[0].id !== p.firstId && p.count > 0 && messages.length > p.count) {
+        // Older page prepended: anchor on the message that was first before.
+        pinScroll(messages.length - p.count, "start");
+      }
+    }
+    prev.current = { firstId: messages[0]?.id ?? "", count: messages.length };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
+
+  useEffect(() => () => cancelAnimationFrame(rafId.current), []);
+
+  useEffect(() => {
+    if (ready && hasMore && !isLoadingOlder && firstVisible < 5) {
+      void loadOlder();
+    }
+  }, [ready, firstVisible, hasMore, isLoadingOlder, loadOlder, messages.length]);
 
   return (
     <>
@@ -233,19 +298,39 @@ function MessagePane({ thread }: { thread: ChatThread }) {
         </div>
       </div>
 
-      <div ref={scrollRef} className="flex-1 space-y-4.5 overflow-y-auto px-6 py-5">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-5">
         {isLoading ? (
           <div className="flex h-full items-center justify-center text-neutral-500">
             <LoaderCircle className="h-5 w-5 animate-spin" />
           </div>
-        ) : error ? (
+        ) : error && messages.length === 0 ? (
           <div className="rounded-md bg-red-500/8 px-3 py-2 text-xs text-red-300 ring-1 ring-red-400/25">{error}</div>
         ) : messages.length === 0 ? (
           <p className="text-sm text-neutral-500">No messages in this conversation.</p>
         ) : (
-          messages.map((message) => (
-            <MessageBubble key={message.id} message={message} isGroup={thread.is_group} onOpenMedia={setOpenMediaId} />
-          ))
+          <>
+            {isLoadingOlder ? (
+              <div className="flex justify-center pb-3 text-neutral-500">
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              </div>
+            ) : null}
+            <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+              {virtualItems.map((item) => (
+                <div
+                  key={item.key}
+                  data-index={item.index}
+                  ref={virtualizer.measureElement}
+                  className="absolute left-0 top-0 w-full pb-4.5"
+                  style={{ transform: `translateY(${item.start}px)` }}
+                >
+                  <MessageBubble message={messages[item.index]} isGroup={thread.is_group} onOpenMedia={setOpenMediaId} />
+                </div>
+              ))}
+            </div>
+            {error ? (
+              <div className="mt-2 rounded-md bg-red-500/8 px-3 py-2 text-xs text-red-300 ring-1 ring-red-400/25">{error}</div>
+            ) : null}
+          </>
         )}
       </div>
 

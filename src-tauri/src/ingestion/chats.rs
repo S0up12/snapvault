@@ -102,8 +102,8 @@ pub(super) fn parse_chats_blocking(
             let inserted_count = conn
                 .execute(
                     "INSERT OR IGNORE INTO chat_messages
-                     (id, thread_id, sender, body, sent_at, message_type, source, dedupe_key, raw_media_ids, raw_payload)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'chat_history', ?7, ?8, ?9)",
+                     (id, thread_id, sender, body, sent_at, message_type, source, dedupe_key, raw_media_ids, raw_payload, is_sender)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'chat_history', ?7, ?8, ?9, ?10)",
                     rusqlite::params![
                         Uuid::new_v4().to_string(),
                         thread_id,
@@ -114,6 +114,7 @@ pub(super) fn parse_chats_blocking(
                         dedupe_key,
                         raw_media_ids,
                         entry.to_string(),
+                        entry.get("IsSender").and_then(|v| v.as_bool()).map(i64::from),
                     ],
                 )
                 .map_err(|err| format!("failed to insert chat_message: {err}"))?;

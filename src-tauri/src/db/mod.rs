@@ -39,8 +39,24 @@ pub fn init(app_handle: &AppHandle) -> Result<Connection, String> {
     add_column_if_missing(&conn, "assets", "longitude", "REAL")?;
     add_column_if_missing(&conn, "assets", "playback_path", "TEXT")?;
     add_column_if_missing(&conn, "assets", "thumb_failed", "INTEGER")?;
+    add_column_if_missing(&conn, "chat_messages", "is_sender", "INTEGER")?;
+    backfill_is_sender(&conn)?;
 
     Ok(conn)
+}
+
+/// One-off for rows ingested before `is_sender` existed; a no-op (index-less
+/// scan finds nothing) afterwards. Rows with missing/invalid payload stay NULL
+/// and are resolved at read time.
+fn backfill_is_sender(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "UPDATE chat_messages
+         SET is_sender = CASE json_extract(raw_payload, '$.IsSender') WHEN 1 THEN 1 WHEN 0 THEN 0 END
+         WHERE is_sender IS NULL AND raw_payload IS NOT NULL AND json_valid(raw_payload)",
+        [],
+    )
+    .map_err(|err| format!("failed to backfill chat_messages.is_sender: {err}"))?;
+    Ok(())
 }
 
 fn add_column_if_missing(
@@ -94,5 +110,24 @@ mod tests {
             .query_row("SELECT latitude FROM assets WHERE id = 'a1'", [], |row| row.get(0))
             .unwrap();
         assert_eq!(latitude, 51.5);
+    }
+
+    #[test]
+    fn backfills_is_sender_and_skips_invalid_payloads() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(schema::SCHEMA_SQL).unwrap();
+        conn.execute("INSERT INTO chat_threads (id, external_id) VALUES ('t', 'e')", []).unwrap();
+        for (id, payload) in [("a", "{\"IsSender\":true}"), ("b", "{\"IsSender\":false}"), ("c", "not json"), ("d", "{}")] {
+            conn.execute(
+                "INSERT INTO chat_messages (id, thread_id, sender, sent_at, dedupe_key, raw_payload) VALUES (?1, 't', 's', 'x', ?1, ?2)",
+                [id, payload],
+            )
+            .unwrap();
+        }
+        backfill_is_sender(&conn).unwrap();
+        let got: Vec<Option<i64>> = conn
+            .prepare("SELECT is_sender FROM chat_messages ORDER BY id").unwrap()
+            .query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
+        assert_eq!(got, vec![Some(1), Some(0), None, None]);
     }
 }

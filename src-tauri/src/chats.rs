@@ -95,66 +95,114 @@ fn load_threads(conn: &Connection) -> Result<Vec<ChatThreadSummary>, String> {
     Ok(threads)
 }
 
-/// Lists every message in a thread, oldest first, resolving each message's
-/// "is this me" flag from the raw Snapchat `IsSender` field captured at
-/// ingestion time rather than guessing from the sender name.
+const DEFAULT_PAGE: u32 = 100;
+const MAX_PAGE: u32 = 500;
+
+#[derive(Clone, Serialize)]
+pub struct ChatMessagesPage {
+    /// Chronological (oldest first) within the page.
+    pub messages: Vec<ChatMessageView>,
+    pub has_more: bool,
+    /// Opaque cursor: pass as `before` to load the next older page. None when `has_more` is false.
+    pub next_before: Option<String>,
+}
+
+/// Lists one page of a thread's messages. Without `before` returns the newest
+/// page; pass the previous `next_before` to walk back in time. `is_me` comes
+/// from the denormalised `is_sender` column (raw `IsSender` as fallback).
 #[tauri::command]
 pub fn list_chat_messages(
     state: tauri::State<DbState>,
     thread_id: String,
-) -> Result<Vec<ChatMessageView>, String> {
+    before: Option<String>,
+    limit: Option<u32>,
+) -> Result<ChatMessagesPage, String> {
     let conn = state.0.lock().map_err(|err| err.to_string())?;
-    load_messages(&conn, &thread_id)
+    load_messages(&conn, &thread_id, before.as_deref(), limit)
 }
 
-fn load_messages(conn: &Connection, thread_id: &str) -> Result<Vec<ChatMessageView>, String> {
+fn load_messages(
+    conn: &Connection,
+    thread_id: &str,
+    before: Option<&str>,
+    limit: Option<u32>,
+) -> Result<ChatMessagesPage, String> {
+    let limit = limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE) as usize;
+    // Cursor = "<sent_at>|<id>"; keyset on (sent_at, id) so equal timestamps
+    // paginate stably.
+    let (cur_sent_at, cur_id) = match before {
+        Some(cursor) => {
+            let (s, i) = cursor.split_once('|').ok_or("invalid cursor")?;
+            (Some(s.to_string()), Some(i.to_string()))
+        }
+        None => (None, None),
+    };
+    // Rows with nothing displayable (no body, no media) are filtered here so
+    // pages stay full; see the exact whitespace check below.
     let mut stmt = conn
         .prepare(
-            "SELECT id, sender, body, sent_at, message_type, raw_payload
+            "SELECT id, sender, body, sent_at, message_type, is_sender,
+                    CASE WHEN is_sender IS NULL THEN raw_payload END
              FROM chat_messages
              WHERE thread_id = ?1
-             ORDER BY sent_at ASC",
+               AND (?2 IS NULL OR (sent_at, id) < (?2, ?3))
+               AND ((body IS NOT NULL AND body <> '')
+                    OR EXISTS (SELECT 1 FROM chat_message_assets WHERE message_id = chat_messages.id))
+             ORDER BY sent_at DESC, id DESC
+             LIMIT ?4",
         )
         .map_err(|err| err.to_string())?;
 
+    let mut cursors: Vec<String> = Vec::new();
     let mut messages = stmt
-        .query_map([thread_id], |row| {
+        .query_map(rusqlite::params![thread_id, cur_sent_at, cur_id, limit as i64 + 1], |row| {
             let sender: String = row.get(1)?;
-            let raw_payload: Option<String> = row.get(5)?;
-            let is_me = raw_payload
-                .as_deref()
-                .and_then(is_sender_from_raw_payload)
-                .unwrap_or(false);
+            let is_sender: Option<i64> = row.get(5)?;
+            let raw_payload: Option<String> = row.get(6)?;
+            let is_me = match is_sender {
+                Some(v) => v != 0,
+                None => raw_payload.as_deref().and_then(is_sender_from_raw_payload).unwrap_or(false),
+            };
+            let id: String = row.get(0)?;
+            let sent_at: String = row.get(3)?;
 
-            Ok(ChatMessageView {
-                id: row.get(0)?,
-                sender_label: if is_me { "Me".to_string() } else { sender.clone() },
-                sender,
-                is_me,
-                body: row.get(2)?,
-                sent_at: row.get(3)?,
-                message_type: row.get(4)?,
-                media: Vec::new(),
-            })
+            Ok((
+                format!("{sent_at}|{id}"),
+                ChatMessageView {
+                    id,
+                    sender_label: if is_me { "Me".to_string() } else { sender.clone() },
+                    sender,
+                    is_me,
+                    body: row.get(2)?,
+                    sent_at,
+                    message_type: row.get(4)?,
+                    media: Vec::new(),
+                },
+            ))
         })
         .map_err(|err| err.to_string())?
+        .map(|r| r.map(|(c, m)| { cursors.push(c); m }))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|err| err.to_string())?;
 
-    // Separate query rather than a JOIN on the message query above: a JOIN
-    // would repeat every non-media column per attachment, which then needs
-    // unwinding back into one row per message anyway.
+    let has_more = messages.len() > limit;
+    messages.truncate(limit);
+    let next_before = if has_more { cursors.get(limit - 1).cloned() } else { None };
+    messages.reverse();
+
+    // Media for this page only. Separate query rather than a JOIN: a JOIN
+    // would repeat every non-media column per attachment.
+    let placeholders = vec!["?"; messages.len()].join(",");
     let mut media_stmt = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT cma.message_id, a.id, a.media_type, a.original_path, a.overlay_path, a.thumbnail_path, a.playback_path
              FROM chat_message_assets cma
              JOIN assets a ON a.id = cma.asset_id
-             JOIN chat_messages cm ON cm.id = cma.message_id
-             WHERE cm.thread_id = ?1",
-        )
+             WHERE cma.message_id IN ({placeholders})"
+        ))
         .map_err(|err| err.to_string())?;
     let media_rows = media_stmt
-        .query_map([thread_id], |row| {
+        .query_map(rusqlite::params_from_iter(messages.iter().map(|m| &m.id)), |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 ChatMessageMedia {
@@ -182,18 +230,15 @@ fn load_messages(conn: &Connection, thread_id: &str) -> Result<Vec<ChatMessageVi
         }
     }
 
-    // Drop messages with nothing displayable: no body text and no linked
-    // media. This isn't limited to `TEXT` rows - Snapchat's chat_history.json
-    // routinely references MEDIA/SHARE/STICKER/STATUS/NOTE entries whose
-    // media either has no `Media IDs` at all or an id with no matching file
-    // in the export (expired/premium snaps, media the export just didn't
-    // bundle), so `media` ends up empty for those too. Without this filter
-    // those render as a bare "Media attachment" bubble with nothing inside.
+    // Whitespace-only bodies with no media are not displayable (the SQL
+    // prefilter only drops NULL/empty). Snapchat's chat_history.json routinely
+    // references MEDIA/SHARE/STICKER/... entries with no resolvable file;
+    // without this they render as bare "Media attachment" bubbles.
     messages.retain(|message| {
         message.body.as_deref().is_some_and(|body| !body.trim().is_empty()) || !message.media.is_empty()
     });
 
-    Ok(messages)
+    Ok(ChatMessagesPage { messages, has_more, next_before })
 }
 
 fn is_sender_from_raw_payload(raw_payload: &str) -> Option<bool> {
@@ -257,6 +302,103 @@ mod tests {
         .unwrap();
     }
 
+    fn ids(page: &ChatMessagesPage) -> Vec<String> {
+        page.messages.iter().map(|m| m.body.clone().unwrap()).collect()
+    }
+
+    #[test]
+    fn pagination_newest_first_page_chronological_with_boundaries() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        seed_thread(&conn, "t1", "friend1", None, false);
+        for i in 0..5 {
+            seed_message(&conn, "t1", "f", Some(&format!("m{i}")), &format!("2020-01-0{}T00:00:00.000Z", i + 1), false);
+        }
+        let p1 = load_messages(&conn, "t1", None, Some(2)).unwrap();
+        assert_eq!(ids(&p1), vec!["m3", "m4"]);
+        assert!(p1.has_more);
+        let p2 = load_messages(&conn, "t1", p1.next_before.as_deref(), Some(2)).unwrap();
+        assert_eq!(ids(&p2), vec!["m1", "m2"]);
+        assert!(p2.has_more);
+        // Last page is exactly the remainder: has_more false, no cursor.
+        let p3 = load_messages(&conn, "t1", p2.next_before.as_deref(), Some(2)).unwrap();
+        assert_eq!(ids(&p3), vec!["m0"]);
+        assert!(!p3.has_more && p3.next_before.is_none());
+        // Exact fit: limit == total.
+        let all = load_messages(&conn, "t1", None, Some(5)).unwrap();
+        assert_eq!(all.messages.len(), 5);
+        assert!(!all.has_more);
+        // Limit is clamped, bad cursor rejected.
+        assert_eq!(load_messages(&conn, "t1", None, Some(0)).unwrap().messages.len(), 1);
+        assert!(load_messages(&conn, "t1", Some("garbage"), None).is_err());
+    }
+
+    #[test]
+    fn pagination_is_stable_for_equal_timestamps() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        seed_thread(&conn, "t1", "friend1", None, false);
+        for i in 0..7 {
+            conn.execute(
+                "INSERT INTO chat_messages (id, thread_id, sender, body, sent_at, message_type, source, dedupe_key)
+                 VALUES (?1, 't1', 'f', ?1, '2020-01-01T00:00:00.000Z', 'TEXT', 'chat_history', ?1)",
+                [format!("id{i}")],
+            )
+            .unwrap();
+        }
+        let mut seen = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let page = load_messages(&conn, "t1", cursor.as_deref(), Some(3)).unwrap();
+            let mut got = ids(&page);
+            got.extend(seen);
+            seen = got;
+            if !page.has_more {
+                break;
+            }
+            cursor = page.next_before;
+        }
+        assert_eq!(seen, (0..7).map(|i| format!("id{i}")).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn is_sender_column_wins_and_null_falls_back_to_raw_payload() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        seed_thread(&conn, "t1", "friend1", None, false);
+        // seed_message leaves is_sender NULL: payload says me.
+        seed_message(&conn, "t1", "x", Some("null-col"), "2020-01-01T00:00:00.000Z", true);
+        // Column set, payload disagrees: column wins.
+        conn.execute(
+            "INSERT INTO chat_messages (id, thread_id, sender, body, sent_at, message_type, source, dedupe_key, raw_payload, is_sender)
+             VALUES ('m2', 't1', 'x', 'col', '2020-01-02T00:00:00.000Z', 'TEXT', 'chat_history', 'dk2', '{\"IsSender\":true}', 0)",
+            [],
+        )
+        .unwrap();
+        let page = load_messages(&conn, "t1", None, None).unwrap();
+        assert!(page.messages[0].is_me);
+        assert!(!page.messages[1].is_me);
+    }
+
+    #[test]
+    fn bench_50k_thread() {
+        let path = std::env::temp_dir().join(format!("snapvault-bench-{}.db", uuid::Uuid::new_v4()));
+        let mut conn = Connection::open(&path).unwrap();
+        conn.execute_batch(crate::db::PRAGMAS).unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        seed_thread(&conn, "t1", "friend1", None, false);
+        let tx = conn.transaction().unwrap();
+        for i in 0..50_000 {
+            seed_message(&tx, "t1", "friend1", Some("hello"), &format!("2020-01-01T00:{:02}:{:02}.{:03}Z", i / 60000 % 60, i / 1000 % 60, i % 1000), i % 2 == 0);
+        }
+        tx.commit().unwrap();
+        let start = std::time::Instant::now();
+        let n = load_messages(&conn, "t1", None, Some(100)).unwrap().messages.len();
+        println!("BENCH list_chat_messages 50k: {:?} ({n} messages)", start.elapsed());
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[test]
     fn thread_preview_uses_latest_message_and_you_prefix() {
         let conn = Connection::open_in_memory().unwrap();
@@ -317,7 +459,7 @@ mod tests {
         seed_thread(&conn, "t1", "friend1", None, false);
         seed_message(&conn, "t1", "some_weird_username", Some("hi"), "2020-01-01T00:00:00.000Z", true);
 
-        let messages = load_messages(&conn, "t1").unwrap();
+        let messages = load_messages(&conn, "t1", None, None).unwrap().messages;
         assert!(messages[0].is_me);
         assert_eq!(messages[0].sender_label, "Me");
     }
@@ -330,7 +472,7 @@ mod tests {
         seed_message(&conn, "t1", "friend1", Some("second"), "2020-01-02T00:00:00.000Z", false);
         seed_message(&conn, "t1", "friend1", Some("first"), "2020-01-01T00:00:00.000Z", false);
 
-        let messages = load_messages(&conn, "t1").unwrap();
+        let messages = load_messages(&conn, "t1", None, None).unwrap().messages;
         assert_eq!(messages.iter().map(|m| m.body.clone().unwrap()).collect::<Vec<_>>(), vec!["first", "second"]);
     }
 
@@ -355,7 +497,7 @@ mod tests {
         )
         .unwrap();
 
-        let messages = load_messages(&conn, "t1").unwrap();
+        let messages = load_messages(&conn, "t1", None, None).unwrap().messages;
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].media.len(), 1);
         assert_eq!(messages[0].media[0].original_path, "/chat_media/a.jpg");
@@ -371,7 +513,7 @@ mod tests {
         // Real message - should survive.
         seed_message(&conn, "t1", "friend1", Some("hi"), "2020-01-02T00:00:00.000Z", false);
 
-        let messages = load_messages(&conn, "t1").unwrap();
+        let messages = load_messages(&conn, "t1", None, None).unwrap().messages;
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].body.as_deref(), Some("hi"));
     }
@@ -402,7 +544,7 @@ mod tests {
             .unwrap();
         }
 
-        let messages = load_messages(&conn, "t1").unwrap();
+        let messages = load_messages(&conn, "t1", None, None).unwrap().messages;
         assert!(messages.is_empty());
     }
 
@@ -437,7 +579,7 @@ mod tests {
         )
         .unwrap();
 
-        let messages = load_messages(&conn, "t1").unwrap();
+        let messages = load_messages(&conn, "t1", None, None).unwrap().messages;
         assert_eq!(messages.len(), 2);
     }
 
@@ -448,7 +590,7 @@ mod tests {
         seed_thread(&conn, "t1", "friend1", None, false);
         seed_message(&conn, "t1", "friend1", Some("hi"), "2020-01-01T00:00:00.000Z", false);
 
-        let messages = load_messages(&conn, "t1").unwrap();
+        let messages = load_messages(&conn, "t1", None, None).unwrap().messages;
         assert!(messages[0].media.is_empty());
     }
 }

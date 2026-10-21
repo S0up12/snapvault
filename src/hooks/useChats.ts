@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type ChatThread = {
   id: string;
@@ -46,33 +46,71 @@ export function useChatThreads() {
   return { threads, isLoading, error };
 }
 
+type ChatMessagePage = { messages: ChatMessage[]; has_more: boolean; next_before: string | null };
+
 export function useChatMessages(threadId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [hasMore, setHasMore] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const nextBefore = useRef<string | null>(null);
+  // Bumped on every thread change; responses from an older generation are dropped.
+  const generation = useRef(0);
+  const busy = useRef(false);
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    const gen = ++generation.current;
+    busy.current = false;
+    setMessages([]);
+    setHasMore(false);
+    setIsLoadingOlder(false);
+    setError(null);
+    nextBefore.current = null;
     if (!threadId) {
-      setMessages([]);
+      setIsLoading(false);
       return;
     }
     setIsLoading(true);
-    setError(null);
+    invoke<ChatMessagePage>("list_chat_messages", { threadId })
+      .then((page) => {
+        if (gen !== generation.current) return;
+        setMessages(page.messages);
+        setHasMore(page.has_more);
+        nextBefore.current = page.next_before;
+      })
+      .catch((err) => gen === generation.current && setError(String(err)))
+      .finally(() => gen === generation.current && setIsLoading(false));
+  }, [threadId]);
+
+  const loadOlder = useCallback(async () => {
+    if (!threadId || busy.current || !nextBefore.current) return;
+    const gen = generation.current;
+    busy.current = true;
+    setIsLoadingOlder(true);
     try {
-      const result = await invoke<ChatMessage[]>("list_chat_messages", { threadId });
-      setMessages(result);
+      const page = await invoke<ChatMessagePage>("list_chat_messages", {
+        threadId,
+        before: nextBefore.current,
+      });
+      if (gen !== generation.current) return;
+      setMessages((prev) => {
+        const seen = new Set(prev.map((m) => m.id));
+        return [...page.messages.filter((m) => !seen.has(m.id)), ...prev];
+      });
+      setHasMore(page.has_more);
+      nextBefore.current = page.next_before;
     } catch (err) {
-      setError(String(err));
+      if (gen === generation.current) setError(String(err));
     } finally {
-      setIsLoading(false);
+      if (gen === generation.current) {
+        busy.current = false;
+        setIsLoadingOlder(false);
+      }
     }
   }, [threadId]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  return { messages, isLoading, error };
+  return { messages, isLoading, isLoadingOlder, error, hasMore, loadOlder };
 }
 
 // Avatar initials from a display name, mirroring the reference app's

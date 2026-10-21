@@ -121,10 +121,12 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     dedupe_key TEXT NOT NULL UNIQUE,
     raw_media_ids TEXT,
     raw_payload TEXT,
+    is_sender INTEGER,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS ix_chat_messages_thread_sent_at ON chat_messages (thread_id, sent_at);
+CREATE INDEX IF NOT EXISTS ix_chat_messages_thread_sent_at_id ON chat_messages (thread_id, sent_at, id);
 CREATE INDEX IF NOT EXISTS ix_chat_messages_sent_at ON chat_messages (sent_at);
 CREATE TRIGGER IF NOT EXISTS trg_chat_messages_updated_at
 AFTER UPDATE ON chat_messages FOR EACH ROW
