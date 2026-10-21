@@ -225,9 +225,13 @@ fn is_date_prefix(s: &str) -> bool {
 /// the same row instead of duplicating it.
 fn upsert_chat_asset(conn: &Connection, path: &Path) -> Result<String, String> {
     let original_path = path.display().to_string();
+    // Stable across imports (original_path is per-job); filenames embed the
+    // Snapchat media id. Legacy rows have NULL external_id -> path fallback.
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let external_id = format!("chat:{file_name}");
     if let Ok(id) = conn.query_row(
-        "SELECT id FROM assets WHERE original_path = ?1",
-        [&original_path],
+        "SELECT id FROM assets WHERE (source_type = 'chat' AND external_id = ?1) OR original_path = ?2",
+        rusqlite::params![external_id, original_path],
         |row| row.get::<_, String>(0),
     ) {
         return Ok(id);
@@ -239,9 +243,9 @@ fn upsert_chat_asset(conn: &Connection, path: &Path) -> Result<String, String> {
     let file_size_bytes = fs::metadata(path).map(|m| m.len()).ok();
 
     conn.execute(
-        "INSERT INTO assets (id, source_type, media_type, original_path, file_size_bytes)
-         VALUES (?1, 'chat', ?2, ?3, ?4)",
-        rusqlite::params![id, media_type, original_path, file_size_bytes],
+        "INSERT INTO assets (id, external_id, source_type, media_type, original_path, file_size_bytes)
+         VALUES (?1, ?5, 'chat', ?2, ?3, ?4)",
+        rusqlite::params![id, media_type, original_path, file_size_bytes, external_id],
     )
     .map_err(|err| format!("failed to insert chat asset: {err}"))?;
     Ok(id)
@@ -312,7 +316,7 @@ fn upsert_chat_thread(
         // Keep title/is_group fresh: a re-ingestion might resolve a friend's
         // display name or discover a group's title that wasn't known before.
         conn.execute(
-            "UPDATE chat_threads SET title = ?1, is_group = ?2 WHERE id = ?3",
+            "UPDATE chat_threads SET title = COALESCE(?1, title), is_group = ?2 WHERE id = ?3",
             rusqlite::params![title, is_group as i64, id],
         )
         .map_err(|err| err.to_string())?;
@@ -425,6 +429,17 @@ mod tests {
         // duplicate either.
         let second = parse_chats_blocking(&conn, job_dir, &|_, _, _| {}).unwrap();
         assert_eq!(second.media_assets_linked, 0);
+        let asset_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM assets", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(asset_count, 1);
+
+        // Same export extracted into a different job dir (new original_path).
+        let part_dir2 = part_dir_with_chat_history(&payload);
+        let media_dir2 = part_dir2.join("chat_media");
+        fs::create_dir_all(&media_dir2).unwrap();
+        fs::write(media_dir2.join("2026-07-07_b~EiQSFabc.jpg"), b"fake-jpg-bytes").unwrap();
+        parse_chats_blocking(&conn, part_dir2.parent().unwrap(), &|_, _, _| {}).unwrap();
         let asset_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM assets", [], |row| row.get(0))
             .unwrap();

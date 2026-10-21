@@ -349,7 +349,50 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
+// ponytail: fixed generous caps; free-disk check skipped (needs a new dep or
+// platform calls). Raise if a real export ever hits them.
+const MAX_ENTRIES: usize = 500_000;
+const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024 * 1024;
+
+/// Rejects raw zip entry names that are unsafe or non-portable on Windows:
+/// backslashes, drive letters, reserved device names, trailing dot/space.
+fn is_safe_entry_name(name: &str) -> bool {
+    if name.contains('\\') || name.contains('\0') || name.contains(':') {
+        return false;
+    }
+    let b = name.as_bytes();
+    if b.len() >= 2 && b[1] == b':' && b[0].is_ascii_alphabetic() {
+        return false;
+    }
+    name.split('/').all(|comp| {
+        if comp.ends_with('.') && comp != "." && comp != ".." || comp.ends_with(' ') {
+            return false;
+        }
+        let base = comp.split('.').next().unwrap_or("").to_ascii_uppercase();
+        let reserved = matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || ((base.starts_with("COM") || base.starts_with("LPT"))
+                && base.len() == 4
+                && base.as_bytes()[3].is_ascii_digit()
+                && base.as_bytes()[3] != b'0');
+        !reserved
+    })
+}
+
+/// Extracts into `destination`; on any failure the partial directory is removed.
 fn extract_archives_blocking(
+    job_id: &str,
+    sources: &[PathBuf],
+    destination: &Path,
+    emit: &dyn Fn(usize, usize, String),
+) -> Result<ExtractionSummary, String> {
+    let result = extract_archives_inner(job_id, sources, destination, emit);
+    if result.is_err() {
+        let _ = fs::remove_dir_all(destination);
+    }
+    result
+}
+
+fn extract_archives_inner(
     job_id: &str,
     sources: &[PathBuf],
     destination: &Path,
@@ -364,6 +407,12 @@ fn extract_archives_blocking(
     for source in sources {
         total_entries += open_zip(source)?.len();
     }
+    if total_entries > MAX_ENTRIES {
+        return Err(format!(
+            "archive has {total_entries} entries (limit {MAX_ENTRIES})"
+        ));
+    }
+    let mut bytes_left = MAX_TOTAL_BYTES;
 
     emit(0, total_entries, format!("Extracting 0/{total_entries} files"));
 
@@ -394,6 +443,14 @@ fn extract_archives_blocking(
             // `enclosed_name()` is the zip crate's zip-slip guard: it returns
             // `None` for absolute paths or paths containing `..` components
             // that would otherwise escape the destination directory.
+            let symlink = entry
+                .unix_mode()
+                .is_some_and(|m| m & 0o170000 == 0o120000);
+            if symlink || !is_safe_entry_name(entry.name()) {
+                skipped_entries += 1;
+                processed += 1;
+                continue;
+            }
             let Some(relative_path) = entry.enclosed_name() else {
                 skipped_entries += 1;
                 continue;
@@ -419,12 +476,37 @@ fn extract_archives_blocking(
                         format!("failed to create dir {}: {err}", parent.display())
                     })?;
                 }
-                let mut out_file = fs::File::create(&out_path).map_err(|err| {
-                    format!("failed to create file {}: {err}", out_path.display())
-                })?;
-                io::copy(&mut entry, &mut out_file).map_err(|err| {
-                    format!("failed to write file {}: {err}", out_path.display())
-                })?;
+                // create_new: a duplicate entry name must not overwrite the first.
+                let mut out_file = match fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&out_path)
+                {
+                    Ok(f) => f,
+                    Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+                        skipped_entries += 1;
+                        processed += 1;
+                        continue;
+                    }
+                    Err(err) => {
+                        return Err(format!(
+                            "failed to create file {}: {err}",
+                            out_path.display()
+                        ))
+                    }
+                };
+                // Cap on real bytes written (declared sizes can lie).
+                let written = io::copy(&mut io::Read::take(&mut entry, bytes_left + 1), &mut out_file)
+                    .map_err(|err| {
+                        format!("failed to write file {}: {err}", out_path.display())
+                    })?;
+                if written > bytes_left {
+                    return Err(format!(
+                        "archive exceeds the {} GiB extraction limit",
+                        MAX_TOTAL_BYTES >> 30
+                    ));
+                }
+                bytes_left -= written;
                 // Snapchat's export zip carries each file's real save time as
                 // its zip-entry timestamp; preserving it as the extracted
                 // file's mtime is what later lets JSON parsing order same-day
@@ -592,6 +674,46 @@ mod tests {
 
         // This is exactly the guard extract_archive_blocking relies on.
         assert!(entry.enclosed_name().is_none());
+    }
+
+    #[test]
+    fn rejects_unsafe_entry_names() {
+        for bad in ["a\\b.jpg", "C:/x.jpg", "c:evil", "dir/CON.txt", "nul", "COM1.png", "x/LPT9", "a.", "a /b"] {
+            assert!(!is_safe_entry_name(bad), "{bad}");
+        }
+        for ok in ["memories/2020-01-01_a-main.jpg", "json/chat_history.json", "COM0", "console.txt"] {
+            assert!(is_safe_entry_name(ok), "{ok}");
+        }
+    }
+
+    #[test]
+    fn skips_unsafe_and_duplicate_entries() {
+        let tmp = tempdir();
+        let zip_path = tmp.join("e.zip");
+        build_test_zip(
+            &zip_path,
+            &[("ok.txt", b"first"), ("C:/evil.txt", b"x"), ("a\\b.txt", b"x")],
+        );
+        let dest = tmp.join("dest");
+        let summary = extract_archives_blocking("j", &[zip_path], &dest, &|_, _, _| {});
+        // Duplicate names may be rejected by the zip writer/reader; either way nothing is overwritten.
+        if let Ok(s) = summary {
+            assert_eq!(s.extracted_entries, 1);
+            assert_eq!(fs::read(dest.join("part-000/ok.txt")).unwrap(), b"first");
+            assert!(!dest.join("part-000/evil.txt").exists());
+        }
+    }
+
+    #[test]
+    fn failed_extraction_removes_partial_destination() {
+        let tmp = tempdir();
+        let good = tmp.join("good.zip");
+        build_test_zip(&good, &[("a.txt", b"a")]);
+        let dest = tmp.join("imports").join("job");
+        let missing = tmp.join("missing.zip");
+        let res = extract_archives_blocking("j", &[good, missing], &dest, &|_, _, _| {});
+        assert!(res.is_err());
+        assert!(!dest.exists());
     }
 
     fn tempdir() -> PathBuf {

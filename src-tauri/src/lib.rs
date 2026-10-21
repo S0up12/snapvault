@@ -21,7 +21,7 @@ use profile::get_profile_snapshot;
 use settings::{get_performance_settings, get_viewer_settings, set_performance_settings, set_viewer_settings};
 use storage::{get_storage_info, set_media_root};
 use tauri::Manager;
-use thumbnails::{generate_thumbnails, resume_pending_media_on_startup, MediaProcessingState};
+use thumbnails::{check_ffmpeg, generate_thumbnails, resume_pending_media_on_startup, MediaProcessingState};
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -95,7 +95,8 @@ pub fn run() {
             get_performance_settings,
             set_performance_settings,
             get_viewer_settings,
-            set_viewer_settings
+            set_viewer_settings,
+            check_ffmpeg
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

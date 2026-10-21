@@ -34,6 +34,20 @@ fn no_window_command(program: &str) -> Command {
     cmd
 }
 
+/// Cheap availability probe: returns ffmpeg's first `-version` line, or Err
+/// when it isn't installed / on PATH (ffprobe ships alongside it).
+#[tauri::command]
+pub fn check_ffmpeg() -> Result<String, String> {
+    let output = no_window_command("ffmpeg")
+        .arg("-version")
+        .output()
+        .map_err(|err| format!("ffmpeg not found on PATH: {err}"))?;
+    if !output.status.success() {
+        return Err(format!("ffmpeg -version exited with {}", output.status));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).lines().next().unwrap_or("ffmpeg").to_string())
+}
+
 #[derive(Clone, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum ProgressPayload {
@@ -226,6 +240,10 @@ pub(crate) fn process_pending_media(
                         )
                     };
                     result.map_err(|err| format!("failed to update playback_path for {}: {err}", asset.id))?;
+                    if final_path != asset.original_path {
+                        // DB now points at the new file; safe to drop the old one.
+                        let _ = std::fs::remove_file(&asset.original_path);
+                    }
                     playback_transcoded += 1;
                 }
                 Ok(None) => {
@@ -520,12 +538,9 @@ fn ensure_playback_copy(asset: &PendingAsset, settings: &PerformanceSettings) ->
     std::fs::rename(&tmp_path, &final_path)
         .map_err(|err| format!("failed to finalize playback copy {}: {err}", final_path.display()))?;
 
-    if final_path != input {
-        // Extension had to change (source wasn't .mp4/.m4v) - the original
-        // still exists under its old name, now redundant.
-        let _ = std::fs::remove_file(&input);
-    }
-
+    // When the extension changed, the old original is NOT removed here: the
+    // caller deletes it only after the DB row points at `final_path`, so a
+    // crash in between leaves a valid original_path instead of a dangling one.
     Ok(Some(final_path))
 }
 

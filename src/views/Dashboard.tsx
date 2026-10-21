@@ -3,6 +3,7 @@ import { Clapperboard } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import ImportFlow from "../components/ImportFlow";
+import { useFfmpegCheck } from "../hooks/useFfmpegCheck";
 import { useLibraryStats } from "../hooks/useLibraryStats";
 import { useMemories } from "../hooks/useMemories";
 import { useProfile } from "../hooks/useProfile";
@@ -32,11 +33,19 @@ function StatTile({ label, value, accent }: { label: string; value: string; acce
 
 export default function Dashboard() {
   const { stats } = useLibraryStats();
+  const { error: ffmpegError } = useFfmpegCheck();
   const { profile } = useProfile();
   const { assets: recent } = useMemories("desc", "all", null, null);
 
   return (
     <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-6">
+      {ffmpegError ? (
+        <div role="alert" className="rounded-md bg-surface px-4 py-3 text-[13px] text-amber-300 ring-1 ring-amber-400/40">
+          ffmpeg was not found on PATH, so thumbnails and video playback conversion will not work. Install ffmpeg
+          and restart SnapVault. <span className="text-neutral-500">({ffmpegError})</span>
+        </div>
+      ) : null}
+
       <div>
         <h2 className="text-[26px] tracking-[-0.02em]">Welcome back</h2>
         <div className="mt-1.5 text-[11px] uppercase tracking-[0.16em] text-neutral-500">

@@ -117,13 +117,14 @@ fn verify_library_blocking(conn: &Connection) -> Result<VerifySummary, String> {
 /// SQLite holds that file open for the app's whole lifetime.
 #[tauri::command]
 pub async fn reset_library(app: AppHandle, state: tauri::State<'_, DbState>) -> Result<(), String> {
+    // Held for the whole reset so media processing / ingestion's media phase
+    // can't run against half-deleted state.
+    let _slot = crate::thumbnails::MediaSlot::try_acquire(&app)
+        .ok_or_else(|| "Media processing or an import is running; try again when it finishes.".to_string())?;
     let media_root = crate::storage::resolve_media_root(&app)?;
 
-    {
-        let conn = state.0.lock().map_err(|err| err.to_string())?;
-        reset_library_blocking(&conn)?;
-    }
-
+    // Files first: if this fails the DB still lists rows whose files may be
+    // partly gone, so the user must retry the reset (it deletes what's left).
     for dir_name in ["imports", "thumbnails", "playback"] {
         let dir = media_root.join(dir_name);
         if dir.is_dir() {
@@ -131,12 +132,17 @@ pub async fn reset_library(app: AppHandle, state: tauri::State<'_, DbState>) -> 
         }
     }
 
-    Ok(())
+    let conn = state.0.lock().map_err(|err| err.to_string())?;
+    reset_library_blocking(&conn)
 }
 
 fn reset_library_blocking(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(
-        "PRAGMA foreign_keys = OFF;
+    // The pragma is a no-op inside a transaction, so toggle it around one and
+    // restore it unconditionally, even if a DELETE fails.
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")
+        .map_err(|err| format!("failed to reset database: {err}"))?;
+    let result = conn.execute_batch(
+        "BEGIN;
          DELETE FROM chat_message_assets;
          DELETE FROM chat_messages;
          DELETE FROM chat_threads;
@@ -147,10 +153,17 @@ fn reset_library_blocking(conn: &Connection) -> Result<(), String> {
          DELETE FROM assets;
          DELETE FROM ingestion_jobs;
          DELETE FROM profile_snapshots;
-         PRAGMA foreign_keys = ON;
-         VACUUM;",
-    )
-    .map_err(|err| format!("failed to reset database: {err}"))
+         COMMIT;",
+    );
+    if result.is_err() {
+        let _ = conn.execute_batch("ROLLBACK;");
+    }
+    let restore = conn.execute_batch("PRAGMA foreign_keys = ON;");
+    result.map_err(|err| format!("failed to reset database: {err}"))?;
+    restore.map_err(|err| format!("failed to restore foreign_keys: {err}"))?;
+    // Best effort: space reclaim only.
+    let _ = conn.execute_batch("VACUUM;");
+    Ok(())
 }
 
 #[cfg(test)]

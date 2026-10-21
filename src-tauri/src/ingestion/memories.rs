@@ -455,16 +455,18 @@ fn upsert_asset(
     day_location: Option<(f64, f64)>,
 ) -> Result<(String, bool), String> {
     let original_path = group.main_path.display().to_string();
+    // Each import extracts into a fresh imports/<job>/ dir, so original_path
+    // differs per job; the stem (date + Snapchat id) is the stable key.
+    let external_id = format!("memories:{}", group.stem);
     if let Ok(id) = conn.query_row(
-        "SELECT id FROM assets WHERE original_path = ?1",
-        [&original_path],
+        "SELECT id FROM assets WHERE (source_type = 'memory' AND external_id = ?1) OR original_path = ?2",
+        rusqlite::params![external_id, original_path],
         |row| row.get::<_, String>(0),
     ) {
         return Ok((id, false));
     }
 
     let id = Uuid::new_v4().to_string();
-    let external_id = format!("memories:{}", group.stem);
     let extension = group
         .main_path
         .extension()

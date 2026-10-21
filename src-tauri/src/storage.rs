@@ -138,6 +138,8 @@ pub fn get_storage_info(app: AppHandle) -> Result<StorageInfo, String> {
 /// files, so relocating with data present would silently orphan it.
 #[tauri::command]
 pub fn set_media_root(app: AppHandle, state: tauri::State<DbState>, path: Option<String>) -> Result<String, String> {
+    let _slot = crate::thumbnails::MediaSlot::try_acquire(&app)
+        .ok_or_else(|| "Media processing or an import is running; try again when it finishes.".to_string())?;
     let conn = state.0.lock().map_err(|err| err.to_string())?;
     let asset_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM assets", [], |row| row.get(0))
