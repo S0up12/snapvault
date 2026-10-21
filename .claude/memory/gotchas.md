@@ -17,3 +17,4 @@
 - reset_library/set_media_root take MediaSlot but ingestion only holds it in its media phase, not during zip extraction.
 - src/index.css @imports Google Fonts (remote); the prod CSP (font-src/style-src self) blocks it, so fonts must be bundled locally. opener scope is https/http `*` because Chats.tsx opens arbitrary chat URLs.
 - Logging macros live in `crate::log` (`crate::log::log_info!` etc.); they are not exported at crate root. Never log paths/filenames/user content. Migrations: SCHEMA_SQL is frozen v1; fresh DBs replay later migrations on top of it.
+- Asset path columns (original/thumbnail/playback/overlay_path) are stored media-root-relative with `/` (migration v2; legacy absolute rows still work). Use `storage::to_relative` on write and `to_absolute` on read; commands handed to the frontend resolve back to absolute. Ingestion derives the root from `<root>/imports/<job>` (`ingestion::media_root_of`). Migrations now take `(&Connection, &Path media_root)`.

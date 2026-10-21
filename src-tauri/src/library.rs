@@ -38,6 +38,7 @@ pub struct MemoriesPage {
 /// restricts to that calendar year.
 #[tauri::command]
 pub fn list_memory_assets(
+    app: tauri::AppHandle,
     state: tauri::State<DbState>,
     offset: i64,
     limit: i64,
@@ -52,7 +53,16 @@ pub fn list_memory_assets(
     let tag = tag.filter(|t| !t.trim().is_empty());
 
     let total = count_matching(&conn, &filter, tag.as_deref(), year)?;
-    let assets = load_page(&conn, offset, limit, &sort, &filter, tag.as_deref(), year)?;
+    let mut assets = load_page(&conn, offset, limit, &sort, &filter, tag.as_deref(), year)?;
+    // DB paths are media-root-relative; the frontend gets absolute ones.
+    let root = crate::storage::resolve_media_root(&app)?;
+    let abs = |p: &str| crate::storage::to_absolute(&root, p).display().to_string();
+    for a in &mut assets {
+        a.original_path = abs(&a.original_path);
+        a.overlay_path = a.overlay_path.as_deref().map(abs);
+        a.thumbnail_path = a.thumbnail_path.as_deref().map(abs);
+        a.playback_path = a.playback_path.as_deref().map(abs);
+    }
 
     Ok(MemoriesPage {
         assets,

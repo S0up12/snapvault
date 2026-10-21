@@ -98,6 +98,11 @@ pub struct IngestionSummary {
     pub playback_failed: usize,
 }
 
+/// Media root for a job dir, which is always `<root>/imports/<job>`.
+pub(super) fn media_root_of(job_dir: &Path) -> PathBuf {
+    job_dir.parent().and_then(Path::parent).unwrap_or(job_dir).to_path_buf()
+}
+
 /// Runs the whole Phase 3 pipeline for one import job: extracts one or more
 /// Snapchat export .zip parts into `<media_root>/imports/<job_id>/part-NNN/`
 /// (`media_root` resolved via `storage::resolve_media_root` - the OS app-data

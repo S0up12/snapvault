@@ -160,6 +160,31 @@ pub(crate) fn fixed_app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// DB form of a media path: relative to `media_root` with `/` separators, so
+/// the library survives a moved root or a renamed OS user. Falls back to the
+/// original string when `abs` is not under `media_root` (e.g. other drive).
+pub fn to_relative(media_root: &Path, abs: &str) -> String {
+    match Path::new(abs).strip_prefix(media_root) {
+        Ok(rel) if !rel.as_os_str().is_empty() => rel
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/"),
+        _ => abs.to_string(),
+    }
+}
+
+/// Resolves a stored path. Accepts new relative paths (joined onto
+/// `media_root`) and legacy absolute/rooted ones (returned unchanged).
+pub fn to_absolute(media_root: &Path, stored: &str) -> PathBuf {
+    let p = Path::new(stored);
+    if p.is_absolute() || p.has_root() {
+        p.to_path_buf()
+    } else {
+        media_root.join(p)
+    }
+}
+
 /// Resolves where `imports`/`thumbnails`/`playback` live. Independent of
 /// `metadata.db`'s location, which always stays at the fixed OS app-data dir
 /// (see `db::init`) - splitting the two avoids a chicken-and-egg bootstrap
@@ -183,9 +208,9 @@ pub fn get_storage_info(app: AppHandle) -> Result<StorageInfo, String> {
 }
 
 /// Changes the media root - only when the library is empty. Enforced here,
-/// not just via the frontend disabling the control: an existing library's
-/// assets carry absolute paths under the old root, and nothing here moves
-/// files, so relocating with data present would silently orphan it.
+/// not just via the frontend disabling the control: nothing here moves files,
+/// so relocating with data present would orphan it (stored paths are now
+/// root-relative, but the files still live under the old root).
 #[tauri::command]
 pub fn set_media_root(app: AppHandle, state: tauri::State<DbState>, path: Option<String>) -> Result<String, String> {
     let _slot = crate::thumbnails::MediaSlot::try_acquire(&app)

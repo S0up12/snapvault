@@ -112,13 +112,24 @@ pub struct ChatMessagesPage {
 /// from the denormalised `is_sender` column (raw `IsSender` as fallback).
 #[tauri::command]
 pub fn list_chat_messages(
+    app: tauri::AppHandle,
     state: tauri::State<DbState>,
     thread_id: String,
     before: Option<String>,
     limit: Option<u32>,
 ) -> Result<ChatMessagesPage, String> {
     let conn = state.0.lock().map_err(|err| err.to_string())?;
-    load_messages(&conn, &thread_id, before.as_deref(), limit)
+    let mut page = load_messages(&conn, &thread_id, before.as_deref(), limit)?;
+    // DB paths are media-root-relative; the frontend gets absolute ones.
+    let root = crate::storage::resolve_media_root(&app)?;
+    let abs = |p: &str| crate::storage::to_absolute(&root, p).display().to_string();
+    for m in page.messages.iter_mut().flat_map(|m| m.media.iter_mut()) {
+        m.original_path = abs(&m.original_path);
+        m.overlay_path = m.overlay_path.as_deref().map(abs);
+        m.thumbnail_path = m.thumbnail_path.as_deref().map(abs);
+        m.playback_path = m.playback_path.as_deref().map(abs);
+    }
+    Ok(page)
 }
 
 fn load_messages(

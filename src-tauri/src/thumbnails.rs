@@ -140,7 +140,7 @@ pub(crate) fn process_pending_media(
 
     let pending = {
         let conn = db.lock().map_err(|err| err.to_string())?;
-        load_pending_assets(&conn)?
+        load_pending_assets(&conn, app_data_dir)?
     };
     let total = pending.len();
     emit(0, total, "Processing media".to_string());
@@ -175,11 +175,12 @@ pub(crate) fn process_pending_media(
         for _ in 0..workers {
             let tx = tx.clone();
             let (next, stop, pending, thumbnail_dir) = (&next, &stop, &pending, &thumbnail_dir);
+            let root = app_data_dir;
             scope.spawn(move || {
                 while !stop.load(Ordering::Relaxed) {
                     let i = next.fetch_add(1, Ordering::Relaxed);
                     let Some(asset) = pending.get(i) else { break };
-                    let ops = process_one(asset, thumbnail_dir, settings);
+                    let ops = process_one(asset, root, thumbnail_dir, settings);
                     if tx.send((asset.id.clone(), ops)).is_err() {
                         break;
                     }
@@ -231,12 +232,14 @@ enum Op {
     ThumbFailed,
     /// ffmpeg couldn't be spawned: counts as failed but isn't marked in the DB.
     ThumbSpawnFailed,
-    Playback { final_path: String, old_path: String },
+    /// `final_path` is DB-relative; `old_path` is the absolute pre-transcode
+    /// file, `Some` only when the extension changed (deleted after commit).
+    Playback { final_path: String, old_path: Option<PathBuf> },
     PlaybackFailed,
 }
 
 /// Slow, DB-free work for one asset (ffprobe + ffmpeg); never aborts the run.
-fn process_one(asset: &PendingAsset, thumbnail_dir: &Path, settings: &PerformanceSettings) -> Vec<Op> {
+fn process_one(asset: &PendingAsset, root: &Path, thumbnail_dir: &Path, settings: &PerformanceSettings) -> Vec<Op> {
     let mut ops = Vec::new();
     // Snapchat voice notes are exported as audio-only .mp4 containers,
     // which `media_type_for_extension` classifies as `video` since it
@@ -256,7 +259,7 @@ fn process_one(asset: &PendingAsset, thumbnail_dir: &Path, settings: &Performanc
     if asset.needs_thumbnail {
         let output_path = thumbnail_dir.join(format!("{}.webp", asset.id));
         match generate_one_thumbnail(asset, &output_path, settings) {
-            Ok(()) => ops.push(Op::Thumb(output_path.display().to_string())),
+            Ok(()) => ops.push(Op::Thumb(crate::storage::to_relative(root, &output_path.display().to_string()))),
             Err(err) => {
                 crate::log::log_error!("[thumbnails] failed for asset {}: {err}", asset.id);
                 // Marked so startup auto-resume doesn't retry forever; manual
@@ -270,8 +273,8 @@ fn process_one(asset: &PendingAsset, thumbnail_dir: &Path, settings: &Performanc
     if asset.needs_playback {
         match ensure_playback_copy(asset, settings) {
             Ok(Some(final_path)) => ops.push(Op::Playback {
-                final_path: final_path.display().to_string(),
-                old_path: asset.original_path.clone(),
+                final_path: crate::storage::to_relative(root, &final_path.display().to_string()),
+                old_path: (final_path != Path::new(&asset.original_path)).then(|| PathBuf::from(&asset.original_path)),
             }),
             Ok(None) => {} // already browser-safe
             Err(err) => {
@@ -301,13 +304,13 @@ fn flush_ops(db: &Mutex<Connection>, batch: &mut Vec<(String, Vec<Op>)>) -> Resu
                     rusqlite::params![path, id],
                 ),
                 Op::ThumbFailed => tx.execute("UPDATE assets SET thumb_failed = 1 WHERE id = ?1", [id]),
-                Op::Playback { final_path, old_path } if final_path == old_path => tx.execute(
+                Op::Playback { final_path, old_path: None } => tx.execute(
                     "UPDATE assets SET playback_path = ?1 WHERE id = ?2",
                     rusqlite::params![final_path, id],
                 ),
-                Op::Playback { final_path, old_path } => {
+                Op::Playback { final_path, old_path: Some(old) } => {
                     // Extension changed (source wasn't .mp4/.m4v).
-                    stale.push(old_path.clone());
+                    stale.push(old.clone());
                     tx.execute(
                         "UPDATE assets SET original_path = ?1, playback_path = ?1 WHERE id = ?2",
                         rusqlite::params![final_path, id],
@@ -443,7 +446,7 @@ pub fn resume_pending_media_on_startup(app: AppHandle) {
     });
 }
 
-fn load_pending_assets(conn: &Connection) -> Result<Vec<PendingAsset>, String> {
+fn load_pending_assets(conn: &Connection, root: &Path) -> Result<Vec<PendingAsset>, String> {
     // `playback_path IS NOT NULL AND playback_path != original_path` catches
     // assets left over from the older side-by-side scheme (a separate
     // `playback/{id}.mp4`, HEVC original untouched) - `needs_playback` covers
@@ -459,14 +462,16 @@ fn load_pending_assets(conn: &Connection) -> Result<Vec<PendingAsset>, String> {
                     OR (media_type = 'video' AND (playback_path IS NULL OR playback_path != original_path)))",
         )
         .map_err(|err| err.to_string())?;
+    // PendingAsset carries absolute paths so all file/ffmpeg code is unchanged.
+    let abs = |p: String| crate::storage::to_absolute(root, &p).display().to_string();
     let rows = stmt
         .query_map([], |row| {
             Ok(PendingAsset {
                 id: row.get(0)?,
                 media_type: row.get(1)?,
-                original_path: row.get(2)?,
-                overlay_path: row.get(3)?,
-                playback_path: row.get(4)?,
+                original_path: abs(row.get::<_, String>(2)?),
+                overlay_path: row.get::<_, Option<String>>(3)?.map(abs),
+                playback_path: row.get::<_, Option<String>>(4)?.map(abs),
                 needs_thumbnail: row.get(5)?,
                 needs_playback: row.get(6)?,
             })
@@ -788,7 +793,7 @@ mod tests {
         )
         .unwrap();
 
-        let pending = load_pending_assets(&conn).unwrap();
+        let pending = load_pending_assets(&conn, Path::new("/r")).unwrap();
         let ids: Vec<&str> = pending.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(ids.len(), 2);
         assert!(ids.contains(&"img"));
@@ -902,7 +907,7 @@ mod tests {
         )
         .unwrap();
 
-        let pending = load_pending_assets(&conn).unwrap();
+        let pending = load_pending_assets(&conn, Path::new("/r")).unwrap();
         assert_eq!(pending.len(), 1);
         assert!(!pending[0].needs_thumbnail);
         assert!(pending[0].needs_playback);
@@ -923,7 +928,7 @@ mod tests {
         )
         .unwrap();
 
-        let pending = load_pending_assets(&conn).unwrap();
+        let pending = load_pending_assets(&conn, Path::new("/r")).unwrap();
         assert_eq!(pending.len(), 1);
         assert!(!pending[0].needs_thumbnail);
         assert!(pending[0].needs_playback);

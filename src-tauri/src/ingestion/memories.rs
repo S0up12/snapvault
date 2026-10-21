@@ -133,7 +133,7 @@ pub(super) fn parse_memories_blocking(
                 unmatched_files += 1;
             }
 
-            let (asset_id, inserted) = upsert_asset(conn, &group, item, day_location)?;
+            let (asset_id, inserted) = upsert_asset(conn, job_dir, &group, item, day_location)?;
             if inserted {
                 assets_inserted += 1;
             }
@@ -455,17 +455,20 @@ fn ensure_memory_collection(conn: &Connection) -> Result<String, String> {
 
 fn upsert_asset(
     conn: &Connection,
+    job_dir: &Path,
     group: &MemoryGroup,
     item: Option<&JsonMemoryItem>,
     day_location: Option<(f64, f64)>,
 ) -> Result<(String, bool), String> {
-    let original_path = group.main_path.display().to_string();
+    let root = super::media_root_of(job_dir);
+    let abs_path = group.main_path.display().to_string();
+    let original_path = crate::storage::to_relative(&root, &abs_path);
     // Each import extracts into a fresh imports/<job>/ dir, so original_path
     // differs per job; the stem (date + Snapchat id) is the stable key.
     let external_id = format!("memories:{}", group.stem);
     if let Ok(id) = conn.query_row(
-        "SELECT id FROM assets WHERE (source_type = 'memory' AND external_id = ?1) OR original_path = ?2",
-        rusqlite::params![external_id, original_path],
+        "SELECT id FROM assets WHERE (source_type = 'memory' AND external_id = ?1) OR original_path IN (?2, ?3)",
+        rusqlite::params![external_id, original_path, abs_path], // ?3: legacy absolute rows
         |row| row.get::<_, String>(0),
     ) {
         return Ok((id, false));
@@ -482,7 +485,7 @@ fn upsert_asset(
     let overlay_path = group
         .overlay_path
         .as_ref()
-        .map(|p| p.display().to_string());
+        .map(|p| crate::storage::to_relative(&root, &p.display().to_string()));
     let taken_at = item
         .and_then(|i| i.taken_at.clone())
         .unwrap_or_else(|| format!("{}T00:00:00.000Z", group.day_key));

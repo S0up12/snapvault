@@ -70,12 +70,13 @@ pub struct VerifySummary {
 /// folder or a partially-failed media processing run without having to
 /// spot-check paths by hand.
 #[tauri::command]
-pub async fn verify_library(state: tauri::State<'_, DbState>) -> Result<VerifySummary, String> {
+pub async fn verify_library(app: AppHandle, state: tauri::State<'_, DbState>) -> Result<VerifySummary, String> {
+    let root = crate::storage::resolve_media_root(&app)?;
     let conn = state.0.lock().map_err(|err| err.to_string())?;
-    verify_library_blocking(&conn)
+    verify_library_blocking(&conn, &root)
 }
 
-fn verify_library_blocking(conn: &Connection) -> Result<VerifySummary, String> {
+fn verify_library_blocking(conn: &Connection, root: &Path) -> Result<VerifySummary, String> {
     let mut stmt = conn
         .prepare("SELECT original_path, thumbnail_path, playback_path FROM assets")
         .map_err(|err| err.to_string())?;
@@ -98,13 +99,13 @@ fn verify_library_blocking(conn: &Connection) -> Result<VerifySummary, String> {
         missing_playback: 0,
     };
     for (original_path, thumbnail_path, playback_path) in &rows {
-        if !Path::new(original_path).is_file() {
+        if !crate::storage::to_absolute(root, original_path).is_file() {
             summary.missing_original += 1;
         }
-        if thumbnail_path.as_deref().is_some_and(|path| !Path::new(path).is_file()) {
+        if thumbnail_path.as_deref().is_some_and(|path| !crate::storage::to_absolute(root, path).is_file()) {
             summary.missing_thumbnail += 1;
         }
-        if playback_path.as_deref().is_some_and(|path| !Path::new(path).is_file()) {
+        if playback_path.as_deref().is_some_and(|path| !crate::storage::to_absolute(root, path).is_file()) {
             summary.missing_playback += 1;
         }
     }
@@ -192,7 +193,7 @@ mod tests {
     #[test]
     fn verify_library_counts_missing_files_per_column() {
         let conn = seeded_conn();
-        let summary = verify_library_blocking(&conn).unwrap();
+        let summary = verify_library_blocking(&conn, Path::new("/r")).unwrap();
         assert_eq!(summary.checked, 2);
         assert_eq!(summary.missing_original, 2);
         assert_eq!(summary.missing_thumbnail, 2);
@@ -209,7 +210,7 @@ mod tests {
         )
         .unwrap();
 
-        let summary = verify_library_blocking(&conn).unwrap();
+        let summary = verify_library_blocking(&conn, Path::new("/r")).unwrap();
         assert_eq!(summary.missing_original, 1);
         assert_eq!(summary.missing_thumbnail, 0);
         assert_eq!(summary.missing_playback, 0);

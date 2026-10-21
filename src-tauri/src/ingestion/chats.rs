@@ -138,7 +138,7 @@ pub(super) fn parse_chats_blocking(
                     let Some(path) = chat_media_files.get(&media_id) else {
                         continue;
                     };
-                    let asset_id = upsert_chat_asset(conn, path)?;
+                    let asset_id = upsert_chat_asset(conn, job_dir, path)?;
                     let linked = conn
                         .execute(
                             "INSERT OR IGNORE INTO chat_message_assets (message_id, asset_id) VALUES (?1, ?2)",
@@ -231,15 +231,16 @@ fn is_date_prefix(s: &str) -> bool {
 /// Upserts a `chat`-sourced asset for a matched `chat_media/` file, keyed by
 /// `original_path` like `memories::upsert_asset` - re-ingestion resolves to
 /// the same row instead of duplicating it.
-fn upsert_chat_asset(conn: &Connection, path: &Path) -> Result<String, String> {
-    let original_path = path.display().to_string();
+fn upsert_chat_asset(conn: &Connection, job_dir: &Path, path: &Path) -> Result<String, String> {
+    let abs_path = path.display().to_string();
+    let original_path = crate::storage::to_relative(&super::media_root_of(job_dir), &abs_path);
     // Stable across imports (original_path is per-job); filenames embed the
     // Snapchat media id. Legacy rows have NULL external_id -> path fallback.
     let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     let external_id = format!("chat:{file_name}");
     if let Ok(id) = conn.query_row(
-        "SELECT id FROM assets WHERE (source_type = 'chat' AND external_id = ?1) OR original_path = ?2",
-        rusqlite::params![external_id, original_path],
+        "SELECT id FROM assets WHERE (source_type = 'chat' AND external_id = ?1) OR original_path IN (?2, ?3)",
+        rusqlite::params![external_id, original_path, abs_path], // ?3: legacy absolute rows
         |row| row.get::<_, String>(0),
     ) {
         return Ok(id);
