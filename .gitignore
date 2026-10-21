@@ -79,7 +79,10 @@ $RECYCLE.BIN/
 .Trash-*
 
 # --- Claude Code local config ---
-.claude/
+# agents, skills, memory and settings.json are shared; only local state is ignored
+.claude/settings.local.json
+.claude/worktrees/
+.claude/scheduled_tasks.lock
 
 # --- Editor / IDE ---
 .vscode/*

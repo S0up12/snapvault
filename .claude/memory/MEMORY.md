@@ -1,0 +1,4 @@
+- [Architecture](architecture.md) - module map, IPC commands, DB tables, events
+- [Gotchas](gotchas.md) - traps and Snapchat-export quirks
+- [Decisions](decisions.md) - choices made and perf measurements
+- [Backlog](backlog.md) - open bugs and next work

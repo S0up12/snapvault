@@ -1,0 +1,24 @@
+{
+  "extraKnownMarketplaces": {
+    "filippo-skills": {
+      "source": {
+        "source": "github",
+        "repo": "filippolmt/skills"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "redesign-skill@filippo-skills": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(cargo check*)",
+      "Bash(cargo test*)",
+      "Bash(cargo clippy*)",
+      "Bash(npx tsc*)",
+      "Bash(git diff*)",
+      "Bash(git status*)",
+      "Bash(git log*)"
+    ]
+  }
+}

@@ -56,3 +56,9 @@ The old project used PostgreSQL managed by SQLAlchemy and Alembic.
 3.  **Phase 3: The Ingestion Engine (CRITICAL):** Build the Rust logic to extract a Snapchat `.zip` export. This includes parsing the JSON files, fixing missing timestamps, storing files locally, and populating the SQLite database. Ensure IPC events stream progress to the React UI.
 4.  **Phase 4: Media Processing:** Implement the background media processor in Rust (using FFmpeg) to composite overlays, generate thumbnails, and format media for the local webview.
 5.  **Phase 5: UI Integration:** Port over the Virtualized Timeline Grid, Lightbox, and Chat views from the reference repo, wiring them up to the new Tauri commands.
+
+## 🤖 Multi-Agent Framework
+The main session is the orchestrator; load the `sv-orchestrate` skill for non-trivial work. Specialist subagents live in `.claude/agents/`: `sv-scout` (haiku, lookup), `sv-rust`, `sv-ingest`, `sv-ui`, `sv-perf`, `sv-reviewer` (sonnet). Skills in `.claude/skills/`: `sv-orchestrate`, `sv-verify`, `sv-add-command`, `sv-parity`, `sv-memory`.
+* **Memory:** shared, committed notes in `.claude/memory/` (read `MEMORY.md` index first, open only the relevant topic file; see `sv-memory` for write rules).
+* **Claude Team plan budget:** do small tasks directly, delegate sequentially, cheapest model that works, tight briefs with summaries under 150 words, max 2 fix rounds, no workflow fan-out unless asked.
+* Verify with `sv-verify` (cargo check / tsc), never by leaving `tauri dev` running.
