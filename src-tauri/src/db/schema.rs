@@ -45,6 +45,7 @@ CREATE INDEX IF NOT EXISTS ix_assets_media_type ON assets (media_type);
 CREATE INDEX IF NOT EXISTS ix_assets_taken_at_media_type ON assets (taken_at, media_type);
 CREATE INDEX IF NOT EXISTS ix_assets_source_type_taken_at ON assets (source_type, taken_at);
 CREATE INDEX IF NOT EXISTS ix_assets_source_type_media_type_taken_at ON assets (source_type, media_type, taken_at);
+CREATE INDEX IF NOT EXISTS ix_assets_source_type_favorite_taken_at ON assets (source_type, is_favorite, taken_at);
 CREATE INDEX IF NOT EXISTS ix_assets_is_favorite ON assets (is_favorite);
 CREATE TRIGGER IF NOT EXISTS trg_assets_updated_at
 AFTER UPDATE ON assets FOR EACH ROW

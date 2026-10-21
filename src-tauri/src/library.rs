@@ -231,7 +231,8 @@ fn media_filter_clause(filter: &str) -> &'static str {
 }
 
 const TAG_FILTER_CLAUSE: &str = "AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value = :tag)";
-const YEAR_FILTER_CLAUSE: &str = "AND substr(taken_at, 1, 4) = :year";
+const YEAR_FILTER_CLAUSE: &str = 
+    "AND taken_at >= :year AND taken_at < CAST(CAST(:year AS INTEGER) + 1 AS TEXT)"; // sargable; ISO text sorts by year prefix
 
 fn count_matching(conn: &Connection, filter: &str, tag: Option<&str>, year: Option<i32>) -> Result<i64, String> {
     let sql = format!(
@@ -512,5 +513,44 @@ mod tests {
             tags.into_iter().collect::<Vec<_>>(),
             vec!["family".to_string(), "friends".to_string(), "trip".to_string()]
         );
+    }
+    #[test]
+    fn bench_year_filter_50k() {
+        use std::time::Instant;
+        let dir = std::env::temp_dir().join(format!("sv_bench_{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&dir);
+        let mut conn = Connection::open(&dir).unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        let tx = conn.transaction().unwrap();
+        for i in 0..50_000u32 {
+            let y = 2014 + i % 10;
+            let ts = format!("{y:04}-{:02}-{:02}T{:02}:{:02}:00.000Z", 1 + i % 12, 1 + i % 28, i % 24, (i / 24) % 60);
+            tx.execute(
+                "INSERT INTO assets (id, media_type, original_path, taken_at, source_type, tags, is_favorite)
+                 VALUES (?1, ?2, ?3, ?4, 'memory', ?5, ?6)",
+                rusqlite::params![format!("id{i:06}"), if i % 3 == 0 { "video" } else { "image" }, format!("/{i}"), ts,
+                    if i % 5 == 0 { "[\"trip\"]" } else { "[]" }, (i % 7 == 0) as i64],
+            ).unwrap();
+        }
+        tx.commit().unwrap();
+        conn.execute_batch("ANALYZE").unwrap();
+        for (label, f, y) in [("all", "all", 2016), ("photo", "photo", 2020), ("fav", "favorite", 2022)] {
+            let plan: Vec<String> = conn.prepare(&format!("EXPLAIN QUERY PLAN SELECT id FROM assets WHERE source_type='memory' {} {} ORDER BY taken_at DESC, id DESC LIMIT 60", media_filter_clause(f), YEAR_FILTER_CLAUSE))
+                .unwrap().query_map(rusqlite::named_params! {":year": format!("{y:04}")}, |r| r.get::<_, String>(3)).unwrap().map(|r| r.unwrap()).collect();
+            let t = Instant::now();
+            let mut ids = Vec::new();
+            let mut n = 0;
+            for _ in 0..20 {
+                n = count_matching(&conn, f, None, Some(y)).unwrap();
+                ids = load_page(&conn, 0, 60, "desc", f, None, Some(y)).unwrap().into_iter().map(|a| a.id).collect();
+            }
+            let tt = Instant::now();
+            for _ in 0..20 { list_years(&conn, f, None, Some(y)).unwrap(); }
+            println!("BENCH {label} y={y}: count+page {:?}/iter, years {:?}/iter, n={n}, first={:?} last={:?} plan={plan:?}", t.elapsed() / 20 - tt.elapsed() / 20 * 0, tt.elapsed() / 20, ids.first(), ids.last());
+        }
+        let t = Instant::now();
+        for _ in 0..20 { let _ = list_years(&conn, "all", None, None).unwrap(); }
+        println!("BENCH years-unfiltered {:?}/iter", t.elapsed() / 20);
+        let _ = std::fs::remove_file(&dir);
     }
 }

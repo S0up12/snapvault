@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 
 import Lightbox from "../components/Lightbox";
@@ -34,6 +34,13 @@ export default function Memories() {
   // whatever the grid is actually showing right now, filtered or not.
   const scrubberYears = useMemoryYears(filter, tag, year);
   const { settings: viewerSettings } = useViewerSettings();
+  // Stable identity so memo(TimelineTile) survives Memories re-renders (e.g. visibleYear changes).
+  const handleToggleFavorite = useCallback(
+    (asset: MemoryAsset) => {
+      void toggleFavorite(asset);
+    },
+    [toggleFavorite],
+  );
 
   return (
     <section className="relative flex h-full min-h-0 w-full flex-col gap-3 overflow-hidden">
@@ -52,9 +59,7 @@ export default function Memories() {
           isInitialLoading={isLoading}
           fetchNextPage={fetchNextPage}
           onOpenAsset={setSelectedIndex}
-          onToggleFavorite={(asset) => {
-            void toggleFavorite(asset);
-          }}
+          onToggleFavorite={handleToggleFavorite}
           onEditTags={setTagEditorAsset}
           fixedColumns={viewerSettings?.grid_columns}
           onVisibleYearChange={setVisibleYear}
@@ -82,9 +87,7 @@ export default function Memories() {
               setSelectedIndex(nextIndex);
             }
           }}
-          onToggleFavorite={(asset) => {
-            void toggleFavorite(asset);
-          }}
+          onToggleFavorite={handleToggleFavorite}
           onEditTags={setTagEditorAsset}
         />
       ) : null}

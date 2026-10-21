@@ -113,11 +113,15 @@ export default function VirtualTimelineGrid({
     },
   });
 
-  useEffect(() => {
+  // Latest values live in a ref so the scroll listener attaches once per element.
+  const scrollStateRef = useRef({ check: () => {} });
+  const lastYearRef = useRef<number | null | undefined>(undefined);
+
+  scrollStateRef.current.check = () => {
     if (!scrollElement) {
       return;
     }
-    const handleScroll = () => {
+    {
       const remaining = scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight;
       if (hasNextPage && !isFetchingNextPage && remaining <= SCROLL_FETCH_THRESHOLD) {
         void fetchNextPage();
@@ -133,13 +137,40 @@ export default function VirtualTimelineGrid({
           : row.type === "header"
             ? yearFromTakenAt(row.groupKey)
             : yearFromTakenAt(row.items[0]?.asset.taken_at ?? null);
-        onVisibleYearChange(year);
+        if (year !== lastYearRef.current) {
+          lastYearRef.current = year;
+          onVisibleYearChange(year);
+        }
       }
-    };
-    handleScroll();
-    scrollElement.addEventListener("scroll", handleScroll, { passive: true });
-    return () => scrollElement.removeEventListener("scroll", handleScroll);
+    }
+  };
+
+  // Re-check when data/layout changes (may need next page or a new year label)...
+  useEffect(() => {
+    scrollStateRef.current.check();
   }, [fetchNextPage, hasNextPage, isFetchingNextPage, onVisibleYearChange, rowVirtualizer, rows, scrollElement]);
+
+  // ...and on scroll, rAF-throttled.
+  useEffect(() => {
+    if (!scrollElement) {
+      return;
+    }
+    let frame = 0;
+    const handleScroll = () => {
+      if (frame) {
+        return;
+      }
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        scrollStateRef.current.check();
+      });
+    };
+    scrollElement.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      scrollElement.removeEventListener("scroll", handleScroll);
+    };
+  }, [scrollElement]);
 
   useEffect(() => {
     scrollElement?.scrollTo({ top: 0 });
