@@ -35,7 +35,7 @@ export default memo(function TimelineTile({
       className="group relative overflow-hidden rounded-md ring-1 ring-white/5 transition hover:ring-accent/40"
       style={{ width, height }}
     >
-      <button type="button" onClick={() => onOpen(index)} className="block h-full w-full" aria-label={`Open ${asset.media_type}`}>
+      <button type="button" onClick={() => onOpen(index)} className="block h-full w-full" aria-label={`Open ${asset.media_type === "video" ? "video" : "photo"} from ${asset.taken_at?.slice(0, 10) ?? "unknown date"}`}>
         {thumbnailUrl ? (
           <img src={thumbnailUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
         ) : (
@@ -50,14 +50,14 @@ export default memo(function TimelineTile({
         <Star className="pointer-events-none absolute right-2.5 top-2.5 h-4 w-4 fill-amber-300 text-amber-300 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]" />
       ) : null}
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center justify-between px-3 pb-3 opacity-0 transition duration-150 group-hover:opacity-100">
+      <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-between px-3 pb-3 opacity-0 transition duration-150 group-focus-within:opacity-100 group-hover:opacity-100">
         <button
           type="button"
           onClick={(event) => {
             event.stopPropagation();
             onToggleFavorite(asset);
           }}
-          className="pointer-events-auto p-1 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)] transition"
+          className="p-1 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)] transition"
           aria-label={asset.is_favorite ? "Remove from favorites" : "Add to favorites"}
           title={asset.is_favorite ? "Unfavorite" : "Favorite"}
         >
@@ -72,7 +72,7 @@ export default memo(function TimelineTile({
             event.stopPropagation();
             onEditTags(asset);
           }}
-          className="pointer-events-auto p-1 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)] transition"
+          className="p-1 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)] transition"
           aria-label="Edit tags"
           title="Edit tags"
         >

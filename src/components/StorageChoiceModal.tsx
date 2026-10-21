@@ -2,6 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { AlertCircle, FolderCog, FolderOpen, HardDrive, LoaderCircle, X } from "lucide-react";
 import { useState } from "react";
 
+import { useDialogFocus } from "../hooks/useDialogFocus";
 import { setMediaRoot } from "../hooks/useStorageSettings";
 
 type StorageChoiceModalProps = {
@@ -14,6 +15,7 @@ type StorageChoiceModalProps = {
 };
 
 export default function StorageChoiceModal({ defaultPath, allowCancel, onCancel, onChosen }: StorageChoiceModalProps) {
+  const dialogRef = useDialogFocus<HTMLDivElement>(allowCancel ? onCancel : undefined);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,7 +58,15 @@ export default function StorageChoiceModal({ defaultPath, allowCancel, onCancel,
 
   return (
     <div className="dialog-backdrop z-[60]" onClick={allowCancel ? onCancel : undefined}>
-      <div className="dialog w-full max-w-lg" onClick={(event) => event.stopPropagation()}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Choose storage location"
+        tabIndex={-1}
+        className="dialog w-full max-w-lg outline-none"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="flex items-start justify-between">
           <div>
             <p className="text-[10px] uppercase tracking-[0.14em] text-accent">Storage Location</p>
@@ -67,7 +77,7 @@ export default function StorageChoiceModal({ defaultPath, allowCancel, onCancel,
             </p>
           </div>
           {allowCancel ? (
-            <button type="button" onClick={onCancel} className="btn btn-secondary btn-icon shrink-0">
+            <button type="button" onClick={onCancel} className="btn btn-secondary btn-icon shrink-0" aria-label="Close">
               <X className="h-4 w-4" />
             </button>
           ) : null}

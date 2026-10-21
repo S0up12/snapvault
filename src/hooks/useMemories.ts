@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeLogged } from "../lib/ipc";
 import { useCallback, useEffect, useState } from "react";
 
 export type MemoryAsset = {
@@ -37,7 +37,7 @@ export function useMemories(sort: MemorySort, filter: MemoryFilter, tag: string 
 
   const loadPage = useCallback(
     async (offset: number, replace = false) => {
-      const page = await invoke<MemoriesPage>("list_memory_assets", { offset, limit: PAGE_SIZE, sort, filter, tag, year });
+      const page = await invokeLogged<MemoriesPage>("list_memory_assets", { offset, limit: PAGE_SIZE, sort, filter, tag, year });
       setTotal(page.total);
       setAssets((current) => (replace || offset === 0 ? page.assets : [...current, ...page.assets]));
       if (replace || offset === 0) {
@@ -79,7 +79,7 @@ export function useMemories(sort: MemorySort, filter: MemoryFilter, tag: string 
       setIsLoading(true);
       setError(null);
       try {
-        const offset = await invoke<number>("memory_year_offset", {
+        const offset = await invokeLogged<number>("memory_year_offset", {
           year: targetYear,
           sort,
           filter,
@@ -101,7 +101,7 @@ export function useMemories(sort: MemorySort, filter: MemoryFilter, tag: string 
     const nextFavorite = !asset.is_favorite;
     setAssets((current) => current.map((a) => (a.id === asset.id ? { ...a, is_favorite: nextFavorite } : a)));
     try {
-      await invoke("set_asset_favorite", { assetId: asset.id, isFavorite: nextFavorite });
+      await invokeLogged("set_asset_favorite", { assetId: asset.id, isFavorite: nextFavorite });
     } catch (err) {
       setAssets((current) => current.map((a) => (a.id === asset.id ? { ...a, is_favorite: !nextFavorite } : a)));
       throw err;
@@ -120,7 +120,7 @@ export function useMemories(sort: MemorySort, filter: MemoryFilter, tag: string 
       }),
     );
     try {
-      await invoke("set_asset_tags", { assetId, tags });
+      await invokeLogged("set_asset_tags", { assetId, tags });
     } catch (err) {
       setAssets((current) => current.map((a) => (a.id === assetId ? { ...a, tags: previous } : a)));
       throw err;
@@ -145,12 +145,12 @@ export function useMemories(sort: MemorySort, filter: MemoryFilter, tag: string 
 export function useMemoryTags() {
   const [tags, setTags] = useState<string[]>([]);
   const refresh = useCallback(async () => {
-    const result = await invoke<string[]>("list_memory_tags");
+    const result = await invokeLogged<string[]>("list_memory_tags");
     setTags(result);
   }, []);
 
   useEffect(() => {
-    refresh().catch(() => {});
+    refresh().catch((e) => console.warn("[useMemories] list failed", String(e)));
   }, [refresh]);
 
   return { tags, refresh };
@@ -165,13 +165,13 @@ export function useMemoryYears(filter: MemoryFilter, tag: string | null, year: n
 
   useEffect(() => {
     let cancelled = false;
-    invoke<number[]>("list_memory_years", { filter, tag, yearFilter: year })
+    invokeLogged<number[]>("list_memory_years", { filter, tag, yearFilter: year })
       .then((result) => {
         if (!cancelled) {
           setYears(result);
         }
       })
-      .catch(() => {});
+      .catch((e) => console.warn("[useMemories] list failed", String(e)));
     return () => {
       cancelled = true;
     };

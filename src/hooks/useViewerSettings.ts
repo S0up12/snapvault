@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeLogged } from "../lib/ipc";
 import { useCallback, useEffect, useState } from "react";
 
 export type ViewerSettings = {
@@ -17,7 +17,7 @@ export function useViewerSettings() {
     setIsLoading(true);
     setError(null);
     try {
-      setSettings(await invoke<ViewerSettings>("get_viewer_settings"));
+      setSettings(await invokeLogged<ViewerSettings>("get_viewer_settings"));
     } catch (err) {
       setError(String(err));
     } finally {
@@ -32,7 +32,7 @@ export function useViewerSettings() {
   const update = useCallback(async (next: ViewerSettings) => {
     setSettings(next);
     try {
-      await invoke("set_viewer_settings", { settings: next });
+      await invokeLogged("set_viewer_settings", { settings: next });
     } catch (err) {
       setError(String(err));
       throw err;

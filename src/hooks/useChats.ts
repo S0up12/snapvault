@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeLogged } from "../lib/ipc";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export type ChatThread = {
@@ -37,7 +37,7 @@ export function useChatThreads() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    invoke<ChatThread[]>("list_chat_threads")
+    invokeLogged<ChatThread[]>("list_chat_threads")
       .then(setThreads)
       .catch((err) => setError(String(err)))
       .finally(() => setIsLoading(false));
@@ -72,7 +72,7 @@ export function useChatMessages(threadId: string | null) {
       return;
     }
     setIsLoading(true);
-    invoke<ChatMessagePage>("list_chat_messages", { threadId })
+    invokeLogged<ChatMessagePage>("list_chat_messages", { threadId })
       .then((page) => {
         if (gen !== generation.current) return;
         setMessages(page.messages);
@@ -89,7 +89,7 @@ export function useChatMessages(threadId: string | null) {
     busy.current = true;
     setIsLoadingOlder(true);
     try {
-      const page = await invoke<ChatMessagePage>("list_chat_messages", {
+      const page = await invokeLogged<ChatMessagePage>("list_chat_messages", {
         threadId,
         before: nextBefore.current,
       });

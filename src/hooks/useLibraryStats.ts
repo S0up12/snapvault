@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeLogged } from "../lib/ipc";
 import { useCallback, useEffect, useState } from "react";
 
 export type LibraryStats = {
@@ -25,7 +25,7 @@ export function useLibraryStats() {
     setIsLoading(true);
     setError(null);
     try {
-      setStats(await invoke<LibraryStats>("get_library_stats"));
+      setStats(await invokeLogged<LibraryStats>("get_library_stats"));
     } catch (err) {
       setError(String(err));
     } finally {

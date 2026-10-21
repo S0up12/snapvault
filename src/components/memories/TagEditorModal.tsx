@@ -1,6 +1,8 @@
 import { Tag, X } from "lucide-react";
 import { useState } from "react";
 
+import { useDialogFocus } from "../../hooks/useDialogFocus";
+
 type TagEditorModalProps = {
   assetId: string;
   initialTags: string[];
@@ -10,6 +12,7 @@ type TagEditorModalProps = {
 };
 
 export default function TagEditorModal({ assetId, initialTags, availableTags, onClose, onSave }: TagEditorModalProps) {
+  const dialogRef = useDialogFocus<HTMLDivElement>(onClose);
   const [draftTags, setDraftTags] = useState<string[]>(initialTags);
   const [input, setInput] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -42,14 +45,22 @@ export default function TagEditorModal({ assetId, initialTags, availableTags, on
 
   return (
     <div className="dialog-backdrop z-[60]" onClick={onClose}>
-      <div className="dialog w-full max-w-md" onClick={(event) => event.stopPropagation()}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Edit tags"
+        tabIndex={-1}
+        className="dialog w-full max-w-md outline-none"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="flex items-center justify-between">
           <div>
             <p className="text-[10px] uppercase tracking-[0.14em] text-accent">Asset Tags</p>
             <h2 className="dialog-title mt-1">Edit Tags</h2>
             <p className="mt-0.5 truncate text-xs text-neutral-500">{assetId}</p>
           </div>
-          <button type="button" onClick={onClose} className="btn btn-secondary btn-icon">
+          <button type="button" onClick={onClose} className="btn btn-secondary btn-icon" aria-label="Close">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -57,6 +68,7 @@ export default function TagEditorModal({ assetId, initialTags, availableTags, on
         <div className="flex gap-2">
           <input
             type="text"
+            data-autofocus
             list="memory-tag-suggestions"
             value={input}
             onChange={(event) => setInput(event.target.value)}

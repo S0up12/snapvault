@@ -17,6 +17,8 @@ pub const MAX_LOG_BYTES: u64 = 2 * 1024 * 1024;
 pub const MAX_FRONTEND_MSG: usize = 2048;
 
 static SINK: OnceLock<Mutex<Sink>> = OnceLock::new();
+/// Known private prefixes (app-data dir, home dir) replaced before anything is written.
+static REDACT: OnceLock<Vec<(String, &'static str)>> = OnceLock::new();
 
 pub struct Sink {
     path: PathBuf,
@@ -74,6 +76,14 @@ impl Sink {
 
 /// Sets up the file sink. Safe to call once; later calls are ignored.
 pub fn init(logs_dir: PathBuf) -> Result<(), String> {
+    let mut redact = Vec::new();
+    if let Some(app_data) = logs_dir.parent() {
+        redact.push((app_data.to_string_lossy().into_owned(), "<app-data>"));
+    }
+    if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+        redact.push((PathBuf::from(home).to_string_lossy().into_owned(), "<home>"));
+    }
+    let _ = REDACT.set(redact);
     let sink = Sink::new(logs_dir.join("snapvault.log"), MAX_LOG_BYTES)?;
     let _ = SINK.set(Mutex::new(sink));
     Ok(())
@@ -94,10 +104,42 @@ fn utc_timestamp(secs: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
+/// Replaces known private prefixes, then any leftover drive-letter path
+/// (`C:\...` up to the next whitespace) with `<path>`.
+pub fn redact(msg: &str, prefixes: &[(String, &'static str)]) -> String {
+    let mut out = msg.to_string();
+    for (prefix, label) in prefixes {
+        if !prefix.is_empty() {
+            out = out.replace(prefix.as_str(), label);
+        }
+    }
+    let bytes: Vec<char> = out.chars().collect();
+    let mut res = String::with_capacity(out.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let drive = i + 2 < bytes.len()
+            && bytes[i].is_ascii_alphabetic()
+            && bytes[i + 1] == ':'
+            && (bytes[i + 2] == '\\' || bytes[i + 2] == '/')
+            && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric());
+        if drive {
+            res.push_str("<path>");
+            while i < bytes.len() && !bytes[i].is_whitespace() {
+                i += 1;
+            }
+        } else {
+            res.push(bytes[i]);
+            i += 1;
+        }
+    }
+    res
+}
+
 pub fn write(level: &str, msg: &str) {
     let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     // One line per record: keep user-visible newlines from forging log lines.
     let msg = msg.replace(['\r', '\n'], " ");
+    let msg = redact(&msg, REDACT.get().map(Vec::as_slice).unwrap_or(&[]));
     let line = format!("{} {level:<5} {msg}", utc_timestamp(secs));
     eprintln!("{line}");
     if let Some(sink) = SINK.get() {
@@ -139,6 +181,14 @@ pub fn log_frontend(level: String, message: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redacts_known_prefixes_and_drive_paths() {
+        let prefixes = vec![(r"C:\Users\Bob\AppData\Roaming\app".to_string(), "<app-data>")];
+        let out = redact(r"failed C:\Users\Bob\AppData\Roaming\app\imports\x.mp4: bad; also D:\media\y.mp4 end", &prefixes);
+        assert_eq!(out, r"failed <app-data>\imports\x.mp4: bad; also <path> end");
+        assert_eq!(redact("ratio 3:4 and a:b ok", &[]), "ratio 3:4 and a:b ok");
+    }
 
     #[test]
     fn timestamp_known_values() {

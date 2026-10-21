@@ -1,5 +1,5 @@
 import { getVersion } from "@tauri-apps/api/app";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeLogged } from "../lib/ipc";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
@@ -505,7 +505,7 @@ function VerifyLibraryPanel() {
     setStatus("running");
     setError(null);
     try {
-      const result = await invoke<VerifySummary>("verify_library");
+      const result = await invokeLogged<VerifySummary>("verify_library");
       setSummary(result);
       setStatus("done");
     } catch (err) {
@@ -597,7 +597,7 @@ function DangerZonePanel() {
     setStatus("running");
     setError(null);
     try {
-      await invoke("reset_library");
+      await invokeLogged("reset_library");
       setStatus("done");
     } catch (err) {
       setError(String(err));

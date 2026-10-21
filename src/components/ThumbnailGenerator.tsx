@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeLogged } from "../lib/ipc";
 import { listen } from "@tauri-apps/api/event";
 import { AlertCircle, CheckCircle2, ImageIcon, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -56,7 +56,7 @@ export default function ThumbnailGenerator() {
     setError(null);
 
     try {
-      const result = await invoke<ThumbnailSummary>("generate_thumbnails");
+      const result = await invokeLogged<ThumbnailSummary>("generate_thumbnails");
       setSummary(result);
       setPercent(100);
       setStatus("completed");

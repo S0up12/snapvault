@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeLogged } from "../lib/ipc";
 import { useCallback, useEffect, useState } from "react";
 
 export type TranscodePreset = "fastest" | "balanced" | "quality";
@@ -17,7 +17,7 @@ export function usePerformanceSettings() {
     setIsLoading(true);
     setError(null);
     try {
-      setSettings(await invoke<PerformanceSettings>("get_performance_settings"));
+      setSettings(await invokeLogged<PerformanceSettings>("get_performance_settings"));
     } catch (err) {
       setError(String(err));
     } finally {
@@ -32,7 +32,7 @@ export function usePerformanceSettings() {
   const update = useCallback(async (next: PerformanceSettings) => {
     setSettings(next);
     try {
-      await invoke("set_performance_settings", { settings: next });
+      await invokeLogged("set_performance_settings", { settings: next });
     } catch (err) {
       setError(String(err));
       throw err;

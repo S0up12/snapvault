@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeLogged } from "../lib/ipc";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AlertCircle, CheckCircle2, Circle, FolderOpen, Loader2 } from "lucide-react";
@@ -94,7 +94,7 @@ export default function ImportFlow() {
   }, []);
 
   async function handleSelectFile() {
-    const storageInfo = await invoke<StorageInfo>("get_storage_info");
+    const storageInfo = await invokeLogged<StorageInfo>("get_storage_info");
     if (storageInfo.needs_first_run_choice) {
       setStorageChoice({ defaultPath: storageInfo.media_root });
       return;
@@ -124,7 +124,7 @@ export default function ImportFlow() {
     setError(null);
 
     try {
-      const result = await invoke<IngestionSummary>("run_ingestion", { archivePaths });
+      const result = await invokeLogged<IngestionSummary>("run_ingestion", { archivePaths });
       setSummary(result);
       setDonePhases(new Set(STEPS.map((step) => step.key)));
       setStatus("completed");

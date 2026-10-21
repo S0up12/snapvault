@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeLogged } from "../lib/ipc";
 import { useEffect, useState } from "react";
 
 export type FriendPreview = {
@@ -55,7 +55,7 @@ export function useProfile() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    invoke<ProfileSnapshot | null>("get_profile_snapshot")
+    invokeLogged<ProfileSnapshot | null>("get_profile_snapshot")
       .then(setProfile)
       .catch((err) => setError(String(err)))
       .finally(() => setIsLoading(false));

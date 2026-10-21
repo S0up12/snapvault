@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Star, Tags, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { formatDayGroup } from "../hooks/useMemories";
+import { useDialogFocus } from "../hooks/useDialogFocus";
 import { useViewerSettings } from "../hooks/useViewerSettings";
 
 // Trackpads/mice fire many small wheel events per physical swipe - this
@@ -73,6 +74,7 @@ export default function Lightbox<T extends LightboxAsset>({
   onEditTags,
 }: LightboxProps<T>) {
   const asset = assets[currentIndex];
+  const dialogRef = useDialogFocus<HTMLDivElement>(); // Escape/arrows handled by the window listener below
   const [mediaBox, setMediaBox] = useState<MediaBox>(null);
   const { settings: viewerSettings, isLoading: viewerSettingsLoading } = useViewerSettings();
   // Defaults on while settings are still loading, so scroll navigation
@@ -268,7 +270,15 @@ export default function Lightbox<T extends LightboxAsset>({
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/95 p-3 sm:p-5" onClick={onClose}>
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${isVideo ? "Video" : isAudio ? "Voice message" : "Photo"} viewer`}
+      tabIndex={-1}
+      className="fixed inset-0 z-50 bg-black/95 p-3 outline-none sm:p-5"
+      onClick={onClose}
+    >
       <div
         className="relative flex h-full w-full flex-col overflow-hidden rounded-lg bg-bg ring-1 ring-white/10"
         onClick={(event) => event.stopPropagation()}
@@ -303,7 +313,7 @@ export default function Lightbox<T extends LightboxAsset>({
             <span className="hidden rounded-full bg-white/[0.04] px-3 py-2 text-xs uppercase tracking-[0.2em] text-neutral-400 ring-1 ring-white/10 sm:inline-flex">
               {currentIndex + 1} / {assets.length}
             </span>
-            <button type="button" onClick={onClose} className="btn btn-secondary btn-icon">
+            <button type="button" onClick={onClose} className="btn btn-secondary btn-icon" aria-label="Close viewer">
               <X className="h-5 w-5" />
             </button>
           </div>

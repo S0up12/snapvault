@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeLogged } from "../lib/ipc";
 import { useCallback, useEffect, useState } from "react";
 
 export type StorageInfo = {
@@ -16,7 +16,7 @@ export function useStorageInfo() {
     setIsLoading(true);
     setError(null);
     try {
-      setInfo(await invoke<StorageInfo>("get_storage_info"));
+      setInfo(await invokeLogged<StorageInfo>("get_storage_info"));
     } catch (err) {
       setError(String(err));
     } finally {
@@ -32,5 +32,5 @@ export function useStorageInfo() {
 }
 
 export async function setMediaRoot(path: string | null): Promise<string> {
-  return invoke<string>("set_media_root", { path });
+  return invokeLogged<string>("set_media_root", { path });
 }

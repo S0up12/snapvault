@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { to: "/chats", label: "Chats" },
   { to: "/memories", label: "Memories" },
   { to: "/profile", label: "Profile" },
+  // Stories hidden (stub): restore with { to: "/stories", label: "Stories" } - route still exists in App.tsx.
 ];
 
 const MEMORY_FILTER_OPTIONS: { value: MemoryFilter; label: string }[] = [
