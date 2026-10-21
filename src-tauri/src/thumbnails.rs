@@ -182,7 +182,7 @@ pub(crate) fn process_pending_media(
                 Ok(()) => {
                     let conn = db.lock().map_err(|err| err.to_string())?;
                     conn.execute(
-                        "UPDATE assets SET thumbnail_path = ?1 WHERE id = ?2",
+                        "UPDATE assets SET thumbnail_path = ?1, thumb_failed = NULL WHERE id = ?2",
                         rusqlite::params![output_path.display().to_string(), asset.id],
                     )
                     .map_err(|err| {
@@ -192,6 +192,16 @@ pub(crate) fn process_pending_media(
                 }
                 Err(err) => {
                     eprintln!("[thumbnails] failed for asset {}: {err}", asset.id);
+                    // Mark so startup auto-resume doesn't retry forever;
+                    // manual generate_thumbnails clears the marker. A spawn
+                    // failure (ffmpeg missing) isn't a per-asset failure.
+                    if err.contains("failed to run ffmpeg") {
+                    } else if let Ok(conn) = db.lock() {
+                        let _ = conn.execute(
+                            "UPDATE assets SET thumb_failed = 1 WHERE id = ?1",
+                            rusqlite::params![asset.id],
+                        );
+                    }
                     failed += 1;
                 }
             }
@@ -247,15 +257,34 @@ pub(crate) fn process_pending_media(
 /// `MediaProcessingState`, then claims it. `run_ingestion`'s media phase uses
 /// this - unlike the manual command/startup resume below, it can't just bail
 /// out with "already running" mid-import, so it waits its turn instead.
-pub(crate) fn acquire_media_processing_slot(app: &AppHandle) {
-    let state = app.state::<MediaProcessingState>();
-    while state.0.swap(true, Ordering::SeqCst) {
-        std::thread::sleep(std::time::Duration::from_millis(500));
+/// RAII guard: releases the slot on drop (incl. panic/early return).
+pub(crate) struct MediaSlot(AppHandle);
+
+impl Drop for MediaSlot {
+    fn drop(&mut self) {
+        self.0.state::<MediaProcessingState>().0.store(false, Ordering::SeqCst);
     }
 }
 
-pub(crate) fn release_media_processing_slot(app: &AppHandle) {
-    app.state::<MediaProcessingState>().0.store(false, Ordering::SeqCst);
+impl MediaSlot {
+    pub(crate) fn try_acquire(app: &AppHandle) -> Option<MediaSlot> {
+        let taken = app.state::<MediaProcessingState>().0.swap(true, Ordering::SeqCst);
+        (!taken).then(|| MediaSlot(app.clone()))
+    }
+}
+
+/// Polls up to 1 hour, then gives up with Err.
+pub(crate) fn acquire_media_processing_slot(app: &AppHandle) -> Result<MediaSlot, String> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3600);
+    loop {
+        if let Some(slot) = MediaSlot::try_acquire(app) {
+            return Ok(slot);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err("Timed out waiting for media processing slot.".to_string());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
 }
 
 /// Shared by the manual `generate_thumbnails` command and the startup
@@ -265,9 +294,13 @@ pub(crate) fn release_media_processing_slot(app: &AppHandle) {
 /// background thread (it shells out to ffmpeg/ffprobe per asset and waits on
 /// each child process) and emits the same `thumbnails://progress` events
 /// either way.
-async fn run_and_emit(app: AppHandle) -> Result<ThumbnailSummary, String> {
-    if app.state::<MediaProcessingState>().0.swap(true, Ordering::SeqCst) {
-        return Err("Media processing is already running.".to_string());
+async fn run_and_emit(app: AppHandle, retry_failed: bool) -> Result<ThumbnailSummary, String> {
+    let slot = MediaSlot::try_acquire(&app)
+        .ok_or_else(|| "Media processing is already running.".to_string())?;
+    if retry_failed {
+        if let Ok(conn) = app.state::<DbState>().0.lock() {
+            let _ = conn.execute("UPDATE assets SET thumb_failed = NULL", []);
+        }
     }
 
     let app_for_blocking = app.clone();
@@ -286,7 +319,7 @@ async fn run_and_emit(app: AppHandle) -> Result<ThumbnailSummary, String> {
     .await
     .map_err(|err| format!("thumbnail generation task panicked: {err}"));
 
-    release_media_processing_slot(&app);
+    drop(slot);
     let result = result.and_then(|inner| inner);
 
     match &result {
@@ -319,7 +352,8 @@ async fn run_and_emit(app: AppHandle) -> Result<ThumbnailSummary, String> {
 /// retry on demand without restarting the app.
 #[tauri::command]
 pub async fn generate_thumbnails(app: AppHandle) -> Result<ThumbnailSummary, String> {
-    run_and_emit(app).await
+    // Manual run retries previously failed thumbnails.
+    run_and_emit(app, true).await
 }
 
 /// Resumes any unfinished media processing left over from a prior run (the
@@ -329,7 +363,7 @@ pub async fn generate_thumbnails(app: AppHandle) -> Result<ThumbnailSummary, Str
 /// not surfaced to any caller, since there isn't one at startup.
 pub fn resume_pending_media_on_startup(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        if let Err(err) = run_and_emit(app).await {
+        if let Err(err) = run_and_emit(app, false).await {
             eprintln!("[thumbnails] startup auto-resume failed: {err}");
         }
     });
@@ -343,11 +377,11 @@ fn load_pending_assets(conn: &Connection) -> Result<Vec<PendingAsset>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, media_type, original_path, overlay_path, playback_path,
-                    thumbnail_path IS NULL,
+                    thumbnail_path IS NULL AND thumb_failed IS NULL,
                     media_type = 'video' AND (playback_path IS NULL OR playback_path != original_path)
              FROM assets
              WHERE media_type IN ('image', 'video')
-               AND (thumbnail_path IS NULL
+               AND ((thumbnail_path IS NULL AND thumb_failed IS NULL)
                     OR (media_type = 'video' AND (playback_path IS NULL OR playback_path != original_path)))",
         )
         .map_err(|err| err.to_string())?;
@@ -557,25 +591,61 @@ fn generate_one_thumbnail(asset: &PendingAsset, output_path: &Path, settings: &P
         return Err(format!("source file missing: {}", input.display()));
     }
 
+    let overlay = asset
+        .overlay_path
+        .as_deref()
+        .map(Path::new)
+        .filter(|path| overlay_is_usable(path));
+
+    if let Some(overlay) = overlay {
+        match run_thumbnail_ffmpeg(&input, Some(overlay), output_path, settings) {
+            Ok(()) => return Ok(()),
+            Err(err) => eprintln!(
+                "[thumbnails] WARN overlay composite failed for asset {} (overlay {}), retrying without overlay: {err}",
+                asset.id,
+                overlay.display()
+            ),
+        }
+    }
+    run_thumbnail_ffmpeg(&input, None, output_path, settings)
+}
+
+/// Overlay must exist, be non-trivial in size and start with the PNG magic
+/// bytes; Snapchat occasionally exports truncated/non-PNG overlay files that
+/// make ffmpeg fail with "Cannot determine format of input".
+fn overlay_is_usable(path: &Path) -> bool {
+    use std::io::Read;
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut magic = [0u8; 8];
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    len >= 67 && file.read_exact(&mut magic).is_ok() && magic == *b"\x89PNG\r\n\x1a\n"
+}
+
+fn run_thumbnail_ffmpeg(
+    input: &Path,
+    overlay: Option<&Path>,
+    output_path: &Path,
+    settings: &PerformanceSettings,
+) -> Result<(), String> {
     let mut command = no_window_command("ffmpeg");
-    command.args(["-y", "-i"]).arg(&input);
+    command.args(["-y", "-i"]).arg(input);
     if let Some(thread_cap) = settings.ffmpeg_thread_cap() {
         command.args(["-threads", &thread_cap.to_string()]);
     }
 
-    let overlay = asset
-        .overlay_path
-        .as_deref()
-        .filter(|path| Path::new(path).is_file());
-
     if let Some(overlay) = overlay {
         command.arg("-i").arg(overlay);
+        // ponytail: scale2ref is deprecated in ffmpeg 7+ but still works;
+        // the replacement (scale with a 2nd input) isn't in older builds.
+        // rw/rh size the overlay to the base frame (iw/ih were a no-op).
         command.args([
             "-frames:v",
             "1",
             "-filter_complex",
             &format!(
-                "[1:v][0:v]scale2ref=w=iw:h=ih[ovr][base];[base][ovr]overlay=format=auto,scale={THUMBNAIL_SIZE}:force_original_aspect_ratio=decrease:flags=lanczos"
+                "[1:v][0:v]scale2ref=w=rw:h=rh[ovr][base];[base][ovr]overlay=format=auto,scale={THUMBNAIL_SIZE}:force_original_aspect_ratio=decrease:flags=lanczos"
             ),
         ]);
     } else {
@@ -599,10 +669,14 @@ fn generate_one_thumbnail(asset: &PendingAsset, output_path: &Path, settings: &P
         .map_err(|err| format!("failed to run ffmpeg (is it installed and on PATH?): {err}"))?;
 
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let tail: Vec<&str> = stderr.lines().rev().take(6).collect();
+        let tail = tail.into_iter().rev().collect::<Vec<_>>().join(" | ");
         return Err(format!(
-            "ffmpeg exited with {}: {}",
+            "ffmpeg exited with {} (inputs: {}{}): {tail}",
             output.status,
-            String::from_utf8_lossy(&output.stderr)
+            input.display(),
+            overlay.map(|o| format!(", {}", o.display())).unwrap_or_default(),
         ));
     }
 

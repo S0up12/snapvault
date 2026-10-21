@@ -72,7 +72,7 @@ pub(super) fn parse_memories_blocking(
         groups_by_day.entry(group.day_key.clone()).or_default().push(group);
     }
     for groups in groups_by_day.values_mut() {
-        groups.sort_by_key(|g| g.mtime);
+        groups.sort_by(|a, b| a.mtime.cmp(&b.mtime).then_with(|| a.stem.cmp(&b.stem)));
     }
     let total_files: usize = groups_by_day.values().map(|v| v.len()).sum();
 
@@ -95,17 +95,39 @@ pub(super) fn parse_memories_blocking(
     let mut position = 0i64;
     let mut processed_files = 0usize;
 
-    for (day_key, groups) in groups_by_day {
-        let json_for_day = json_by_day.get(&day_key);
+    // Sorted days -> deterministic `position` and logs across runs.
+    let mut days: Vec<_> = groups_by_day.into_iter().collect();
+    days.sort_by(|a, b| a.0.cmp(&b.0));
+    for (day_key, groups) in days {
+        // The legacy repair script keyed on zip member path + zip mtime; here
+        // JSON has no filename, so pairing is Nth-of-day and only trustworthy
+        // when the per-day counts agree. On mismatch don't guess: leave the
+        // day's files unpaired (day-level date) and log the counts.
+        let day_items = json_by_day.get(&day_key);
+        let paired = day_items.filter(|items| items.len() == groups.len());
+        // On mismatch still apply what is safe day-wide: location only when
+        // every JSON entry that day agrees (date is already the day key).
+        let mut day_location: Option<(f64, f64)> = None;
+        if let (Some(items), None) = (day_items, paired) {
+            eprintln!(
+                "[ingestion] memories day {day_key}: {} JSON entries vs {} files, no per-file pairing (day-level data only)",
+                items.len(),
+                groups.len()
+            );
+            let first = items.first().and_then(|i| i.latitude.zip(i.longitude));
+            if items.iter().all(|i| i.latitude.zip(i.longitude) == first) {
+                day_location = first;
+            }
+        }
         for (index, group) in groups.into_iter().enumerate() {
-            let item = json_for_day.and_then(|items| items.get(index));
+            let item = paired.and_then(|items| items.get(index));
             if item.is_some() {
                 matched += 1;
             } else {
                 unmatched_files += 1;
             }
 
-            let (asset_id, inserted) = upsert_asset(conn, &group, item)?;
+            let (asset_id, inserted) = upsert_asset(conn, &group, item, day_location)?;
             if inserted {
                 assets_inserted += 1;
             }
@@ -286,6 +308,17 @@ pub(super) fn parse_snap_date(raw: &str) -> Option<(String, String)> {
     {
         return None;
     }
+    let num = |r: std::ops::Range<usize>| cleaned.get(r)?.parse::<u32>().ok();
+    let (year, month, day) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    if !(2010..=2100).contains(&year)
+        || !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || num(11..13)? > 23
+        || num(14..16)? > 59
+        || num(17..19)? > 59
+    {
+        return None;
+    }
     let day_key = cleaned[0..10].to_string();
     let taken_at = format!("{}T{}.000Z", &cleaned[0..10], &cleaned[11..19]);
     Some((day_key, taken_at))
@@ -419,6 +452,7 @@ fn upsert_asset(
     conn: &Connection,
     group: &MemoryGroup,
     item: Option<&JsonMemoryItem>,
+    day_location: Option<(f64, f64)>,
 ) -> Result<(String, bool), String> {
     let original_path = group.main_path.display().to_string();
     if let Ok(id) = conn.query_row(
@@ -445,8 +479,10 @@ fn upsert_asset(
     let taken_at = item
         .and_then(|i| i.taken_at.clone())
         .unwrap_or_else(|| format!("{}T00:00:00.000Z", group.day_key));
-    let latitude = item.and_then(|i| i.latitude);
-    let longitude = item.and_then(|i| i.longitude);
+    let (latitude, longitude) = match item {
+        Some(i) => (i.latitude, i.longitude),
+        None => (day_location.map(|l| l.0), day_location.map(|l| l.1)),
+    };
     let raw_metadata = serde_json::json!({ "relative_path": group.stem }).to_string();
 
     conn.execute(
@@ -488,6 +524,53 @@ mod tests {
     fn rejects_malformed_snap_date() {
         assert!(parse_snap_date("not a date").is_none());
         assert!(parse_snap_date("").is_none());
+        assert!(parse_snap_date("2026-13-04 14:33:51 UTC").is_none());
+        assert!(parse_snap_date("2026-07-04 25:33:51 UTC").is_none());
+        assert!(parse_snap_date("1900-07-04 14:33:51 UTC").is_none());
+    }
+
+    #[test]
+    fn skips_pairing_for_days_with_count_mismatch() {
+        let job_dir = tempdir();
+        let memories_dir = job_dir.join("part-000").join("memories");
+        let json_dir = job_dir.join("part-000").join("json");
+        fs::create_dir_all(&memories_dir).unwrap();
+        fs::create_dir_all(&json_dir).unwrap();
+        // Day A: 1 file, 2 JSON entries (mismatch, same location). Day B: 1 file, 1 entry.
+        fs::write(memories_dir.join("2020-12-19_a-main.jpg"), b"x").unwrap();
+        fs::write(memories_dir.join("2020-12-20_b-main.jpg"), b"x").unwrap();
+        let entry = |d: &str| {
+            serde_json::json!({ "Date": d, "Media Type": "Image", "Location": "Latitude, Longitude: 51.5, 5.3" })
+        };
+        let payload = serde_json::json!({ "Saved Media": [
+            entry("2020-12-19 10:00:00 UTC"),
+            entry("2020-12-19 11:00:00 UTC"),
+            entry("2020-12-20 12:00:00 UTC"),
+        ]});
+        fs::write(json_dir.join("memories_history.json"), payload.to_string()).unwrap();
+
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        let s = parse_memories_blocking(&conn, &job_dir, &|_, _, _| {}).unwrap();
+        assert_eq!((s.matched, s.unmatched_files), (1, 1));
+        let taken: String = conn
+            .query_row(
+                "SELECT taken_at FROM assets WHERE original_path LIKE '%_a-main.jpg'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(taken, "2020-12-19T00:00:00.000Z");
+        // File kept, day-level location applied despite the mismatch.
+        let lat: Option<f64> = conn
+            .query_row(
+                "SELECT latitude FROM assets WHERE original_path LIKE '%_a-main.jpg'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(lat, Some(51.5));
+        assert_eq!(s.assets_inserted, 2);
     }
 
     #[test]

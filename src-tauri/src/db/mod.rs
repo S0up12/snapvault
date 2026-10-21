@@ -36,6 +36,7 @@ pub fn init(app_handle: &AppHandle) -> Result<Connection, String> {
     add_column_if_missing(&conn, "assets", "latitude", "REAL")?;
     add_column_if_missing(&conn, "assets", "longitude", "REAL")?;
     add_column_if_missing(&conn, "assets", "playback_path", "TEXT")?;
+    add_column_if_missing(&conn, "assets", "thumb_failed", "INTEGER")?;
 
     Ok(conn)
 }
