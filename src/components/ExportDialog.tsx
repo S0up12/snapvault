@@ -7,7 +7,7 @@ import { startChatExport, startMemoriesExport, useExport, type ChatExportOptions
 
 export type ExportDialogProps = { onClose: () => void } & (
   | { kind: "memories"; filter: string; tag: string | null; year: number | null; count?: number }
-  | { kind: "chats"; threadId: string | null; label: string }
+  | { kind: "chats"; currentThreadId: string | null; currentLabel: string | null; threadCount: number }
 );
 
 export default function ExportDialog(props: ExportDialogProps) {
@@ -20,6 +20,8 @@ export default function ExportDialog(props: ExportDialogProps) {
   const [setFileTimes, setSetFileTimes] = useState(true);
   const [format, setFormat] = useState<ChatExportOptions["format"]>("html");
   const [includeMedia, setIncludeMedia] = useState(true);
+  const hasCurrent = props.kind === "chats" && props.currentThreadId !== null;
+  const [chatScope, setChatScope] = useState<"this" | "all">(hasCurrent ? "this" : "all");
 
   async function chooseFolder() {
     const picked = await open({ directory: true, multiple: false });
@@ -39,7 +41,12 @@ export default function ExportDialog(props: ExportDialogProps) {
         set_file_times: setFileTimes,
       });
     } else {
-      void startChatExport({ destination, thread_id: props.threadId, format, include_media: includeMedia });
+      void startChatExport({
+        destination,
+        thread_id: chatScope === "this" ? props.currentThreadId : null,
+        format,
+        include_media: includeMedia,
+      });
     }
     onClose();
   }
@@ -49,7 +56,9 @@ export default function ExportDialog(props: ExportDialogProps) {
       ? `Exporting: ${[props.filter, props.tag, props.year].filter((v) => v !== null && v !== "").join(" / ")}${
           props.count !== undefined ? ` (${props.count.toLocaleString()} items)` : ""
         }`
-      : `Exporting: ${props.label}`;
+      : null;
+  const rowLabel = "flex flex-col gap-1.5 text-sm";
+  const rowTitle = "text-xs font-medium text-neutral-400";
 
   return (
     <div className="dialog-backdrop z-[60]" onClick={onClose}>
@@ -69,15 +78,38 @@ export default function ExportDialog(props: ExportDialogProps) {
           </button>
         </div>
 
-        <p className="text-xs text-neutral-400">{scope}</p>
+        {scope ? <p className="text-xs text-neutral-400">{scope}</p> : null}
 
-        <div className="flex items-center gap-2">
-          <button type="button" data-autofocus onClick={() => void chooseFolder()} className="btn btn-secondary">
-            Choose folder...
-          </button>
-          <p className="min-w-0 flex-1 truncate text-xs text-neutral-400" title={destination ?? undefined}>
-            {destination ?? "No folder chosen"}
-          </p>
+        {props.kind === "chats" ? (
+          <fieldset className="flex flex-col gap-1.5 text-sm">
+            <legend className={`${rowTitle} mb-1.5`}>What to export</legend>
+            <label className={`flex items-center gap-2 ${hasCurrent ? "" : "opacity-45"}`}>
+              <input
+                type="radio"
+                name="chat-scope"
+                checked={chatScope === "this"}
+                disabled={!hasCurrent}
+                onChange={() => setChatScope("this")}
+              />
+              <span className="min-w-0 truncate">This chat{props.currentLabel ? ` - ${props.currentLabel}` : ""}</span>
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="radio" name="chat-scope" checked={chatScope === "all"} onChange={() => setChatScope("all")} />
+              All chats ({props.threadCount.toLocaleString()})
+            </label>
+          </fieldset>
+        ) : null}
+
+        <div className={rowLabel}>
+          <span className={rowTitle}>Save to</span>
+          <div className="flex items-center gap-2">
+            <button type="button" data-autofocus onClick={() => void chooseFolder()} className="btn btn-secondary">
+              Choose folder...
+            </button>
+            <p className="min-w-0 flex-1 truncate text-xs text-neutral-400" title={destination ?? undefined}>
+              {destination ?? "No folder chosen"}
+            </p>
+          </div>
         </div>
 
         {props.kind === "memories" ? (
@@ -86,8 +118,8 @@ export default function ExportDialog(props: ExportDialogProps) {
               <input type="checkbox" checked={applyOverlays} onChange={(e) => setApplyOverlays(e.target.checked)} />
               Apply caption/drawing overlays to photos
             </label>
-            <label className="flex items-center gap-2 text-sm">
-              Organize into
+            <label className={rowLabel}>
+              <span className={rowTitle}>Organize into</span>
               <select
                 value={organize}
                 onChange={(e) => setOrganize(e.target.value as MemoriesExportOptions["organize"])}
@@ -106,8 +138,8 @@ export default function ExportDialog(props: ExportDialogProps) {
           </>
         ) : (
           <>
-            <label className="flex items-center gap-2 text-sm">
-              Format
+            <label className={rowLabel}>
+              <span className={rowTitle}>Format</span>
               <select
                 value={format}
                 onChange={(e) => setFormat(e.target.value as ChatExportOptions["format"])}

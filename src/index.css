@@ -135,6 +135,11 @@ body {
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
 }
+/* Unlayered, so it beats Tailwind's layered px-*: room for the icon and clear button. */
+.input-search {
+  padding-left: 36px;
+  padding-right: 32px;
+}
 .input:hover {
   border-color: color-mix(in srgb, var(--color-fg) 45%, transparent);
 }

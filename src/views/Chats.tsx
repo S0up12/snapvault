@@ -1,6 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Clapperboard, LoaderCircle, Play, Search, Users, X } from "lucide-react";
+import { Clapperboard, Download, LoaderCircle, Play, Search, Users, X } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
@@ -88,25 +88,31 @@ export default function Chats() {
   const { chatsFilters } = useOutletContext<LayoutOutletContext>();
   const { threads, isLoading, error } = useChatThreads();
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
   const [jump, setJump] = useState<Jump | null>(null);
-  const [thisChatOnly, setThisChatOnly] = useState(false);
-  const [exportTarget, setExportTarget] = useState<"this" | "all" | null>(null);
+  const [scope, setScope] = useState<"all" | "this">("all");
+  const [exportOpen, setExportOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement | null>(null);
-  const search = useChatSearch(thisChatOnly ? selectedThreadId : null);
   const selectedThread = threads.find((t) => t.id === selectedThreadId) ?? null;
+  const thisChatScope = scope === "this" && selectedThread !== null;
+  const search = useChatSearch(thisChatScope ? selectedThreadId : null);
 
-  const filteredThreads = useMemo(
+  const chatMatches = useMemo(
     () =>
       threads
-        .filter((thread) => thread.display_name.toLowerCase().includes(query.trim().toLowerCase()))
+        .filter((thread) => thread.display_name.toLowerCase().includes(search.query.trim().toLowerCase()))
         .filter((thread) => {
           if (chatsFilters.scope === "group") return thread.is_group;
           if (chatsFilters.scope === "private") return !thread.is_group;
           return true;
         }),
-    [threads, query, chatsFilters.scope],
+    [threads, search.query, chatsFilters.scope],
   );
+
+  const openChat = (id: string) => {
+    setSelectedThreadId(id);
+    setJump(null);
+    search.setQuery("");
+  };
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -132,98 +138,104 @@ export default function Chats() {
   return (
     <section className="flex h-full min-h-0 w-full overflow-hidden rounded-lg ring-1 ring-divider">
       <div className="flex w-[320px] min-w-[220px] shrink-0 flex-col border-r border-divider p-3.5">
+        <div className="mb-2.5 flex items-center justify-between gap-2">
+          <h2 className="text-[15px] font-medium">Chats</h2>
+          <button type="button" onClick={() => setExportOpen(true)} className="btn btn-secondary h-8 px-2.5 text-[13px]">
+            <Download className="h-3.5 w-3.5" />
+            Export
+          </button>
+        </div>
+        {exportOpen ? (
+          <ExportDialog
+            kind="chats"
+            currentThreadId={selectedThread?.id ?? null}
+            currentLabel={selectedThread?.display_name ?? null}
+            threadCount={threads.length}
+            onClose={() => setExportOpen(false)}
+          />
+        ) : null}
         <div className="relative mb-2.5">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-500" />
           <input
             ref={searchRef}
             type="text"
+            role="searchbox"
+            aria-label="Search chats and messages"
             value={search.query}
             onChange={(event) => search.setQuery(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Escape") search.setQuery("");
+              if (event.key !== "Escape") return;
+              if (search.query) search.setQuery("");
+              else event.currentTarget.blur();
             }}
-            placeholder="Search messages"
-            className="input h-9 px-9 text-[13px]"
+            placeholder="Search chats and messages"
+            className="input input-search h-9 text-[13px]"
           />
           {search.query ? (
             <button
               type="button"
               aria-label="Clear search"
-              onClick={() => search.setQuery("")}
+              onClick={() => {
+                search.setQuery("");
+                searchRef.current?.focus();
+              }}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           ) : null}
         </div>
-        <div className="mb-2.5 flex gap-2">
-          {selectedThread ? (
-            <button type="button" onClick={() => setExportTarget("this")} className="btn btn-secondary flex-1">
-              Export this chat
-            </button>
-          ) : null}
-          <button type="button" onClick={() => setExportTarget("all")} className="btn btn-secondary flex-1">
-            Export all chats
-          </button>
-        </div>
-        {exportTarget ? (
-          <ExportDialog
-            kind="chats"
-            threadId={exportTarget === "this" && selectedThread ? selectedThread.id : null}
-            label={exportTarget === "this" && selectedThread ? selectedThread.display_name : "all chats"}
-            onClose={() => setExportTarget(null)}
-          />
-        ) : null}
-        {selectedThread ? (
-          <label className="mb-2.5 flex items-center gap-2 text-xs text-neutral-400">
-            <input type="checkbox" checked={thisChatOnly} onChange={(event) => setThisChatOnly(event.target.checked)} />
-            This chat only
-          </label>
+        {search.active && selectedThread ? (
+          <div role="radiogroup" aria-label="Search scope" className="mb-2.5 grid grid-cols-2 gap-0.5 rounded-md bg-white/[0.04] p-0.5 text-xs">
+            {(["all", "this"] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={scope === value}
+                onClick={() => setScope(value)}
+                className={[
+                  "rounded px-2 py-1 transition",
+                  scope === value ? "bg-white/10 text-fg" : "text-neutral-400 hover:text-neutral-200",
+                ].join(" ")}
+              >
+                {value === "all" ? "All chats" : "This chat"}
+              </button>
+            ))}
+          </div>
         ) : null}
         {search.active ? (
           <SearchResults
             search={search}
+            chats={thisChatScope ? null : chatMatches}
+            selectedThreadId={selectedThreadId}
+            onOpenChat={openChat}
             onOpen={(hit) => {
               setSelectedThreadId(hit.thread_id);
               setJump((j) => ({ id: hit.message_id, n: (j?.n ?? 0) + 1 }));
             }}
           />
         ) : (
-        <>
-        <div className="relative mb-2.5">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-500" />
-          <input
-            type="text"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search people…"
-            className="input h-9 pl-9 text-[13px]"
-          />
-        </div>
-        <div className="flex flex-col gap-0.5 overflow-y-auto">
-          {isLoading ? (
-            <div className="flex flex-1 items-center justify-center py-8 text-neutral-500">
-              <LoaderCircle className="h-5 w-5 animate-spin" />
-            </div>
-          ) : error ? (
-            <div className="rounded-md bg-red-500/8 px-3 py-2 text-xs text-red-300 ring-1 ring-red-400/25">{error}</div>
-          ) : filteredThreads.length === 0 ? (
-            <p className="p-3 text-sm text-neutral-500">No conversations found.</p>
-          ) : (
-            filteredThreads.map((thread) => (
-              <ConversationRow
-                key={thread.id}
-                thread={thread}
-                isSelected={thread.id === selectedThreadId}
-                onSelect={() => {
-                  setSelectedThreadId(thread.id);
-                  setJump(null);
-                }}
-              />
-            ))
-          )}
-        </div>
-        </>
+          <div className="flex flex-col gap-0.5 overflow-y-auto">
+            {isLoading ? (
+              <div className="flex flex-1 items-center justify-center py-8 text-neutral-500">
+                <LoaderCircle className="h-5 w-5 animate-spin" />
+              </div>
+            ) : error ? (
+              <div className="rounded-md bg-red-500/8 px-3 py-2 text-xs text-red-300 ring-1 ring-red-400/25">{error}</div>
+            ) : chatMatches.length === 0 ? (
+              <p className="p-3 text-sm text-neutral-500">No conversations found.</p>
+            ) : (
+              chatMatches.map((thread) => (
+                <ConversationRow
+                  key={thread.id}
+                  thread={thread}
+                  isSelected={thread.id === selectedThreadId}
+                  onSelect={() => openChat(thread.id)}
+                />
+              ))
+            )}
+          </div>
         )}
       </div>
 
@@ -245,24 +257,63 @@ export default function Chats() {
   );
 }
 
+const CHAT_PREVIEW = 8;
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <h3 className="px-1 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-500">{children}</h3>;
+}
+
 function SearchResults({
   search,
+  chats,
+  selectedThreadId,
+  onOpenChat,
   onOpen,
 }: {
   search: ReturnType<typeof useChatSearch>;
+  chats: ChatThread[] | null;
+  selectedThreadId: string | null;
+  onOpenChat: (id: string) => void;
   onOpen: (hit: ChatSearchHit) => void;
 }) {
   const { hits, total, totalCapped, hasMore, isLoading, error, loadMore } = search;
+  const [showAllChats, setShowAllChats] = useState(false);
+  useEffect(() => setShowAllChats(false), [search.query]);
+  const shownChats = chats ? (showAllChats ? chats : chats.slice(0, CHAT_PREVIEW)) : [];
+  const chatsHaveResults = !!chats && chats.length > 0;
   return (
     <div className="flex flex-col gap-0.5 overflow-y-auto">
+      {chats && chatsHaveResults ? (
+        <>
+          <SectionLabel>Chats</SectionLabel>
+          {shownChats.map((thread) => (
+            <ConversationRow
+              key={thread.id}
+              thread={thread}
+              isSelected={thread.id === selectedThreadId}
+              onSelect={() => onOpenChat(thread.id)}
+            />
+          ))}
+          {chats.length > CHAT_PREVIEW && !showAllChats ? (
+            <button type="button" onClick={() => setShowAllChats(true)} className="p-2 text-left text-xs text-accent-300 hover:underline">
+              Show all {chats.length}
+            </button>
+          ) : null}
+        </>
+      ) : null}
+      {hits.length > 0 || isLoading || error ? (
+        <SectionLabel>
+          Messages
+          {hits.length > 0 ? (
+            <span className="ml-2 normal-case tracking-normal">
+              {total.toLocaleString()}
+              {totalCapped ? "+" : ""} {total === 1 && !totalCapped ? "result" : "results"}
+            </span>
+          ) : null}
+        </SectionLabel>
+      ) : null}
       {error ? (
         <div className="rounded-md bg-red-500/8 px-3 py-2 text-xs text-red-300 ring-1 ring-red-400/25">{error}</div>
-      ) : null}
-      {hits.length > 0 ? (
-        <p className="px-1 pb-1 text-[11px] text-neutral-500">
-          {total.toLocaleString()}
-          {totalCapped ? "+" : ""} {total === 1 && !totalCapped ? "result" : "results"}
-        </p>
       ) : null}
       {hits.map((hit) => {
         const title = hit.thread_title ?? "Unknown";
@@ -297,7 +348,9 @@ function SearchResults({
           <LoaderCircle className="h-4 w-4 animate-spin" />
         </div>
       ) : null}
-      {!isLoading && !error && hits.length === 0 ? <p className="p-3 text-sm text-neutral-500">No messages match</p> : null}
+      {!isLoading && !error && hits.length === 0 && !chatsHaveResults ? (
+        <p className="px-1 py-2 text-sm text-neutral-500">{chats ? "No chats or messages match" : "No messages match"}</p>
+      ) : null}
       {hasMore && !isLoading ? (
         <button type="button" onClick={() => void loadMore()} className="p-2 text-xs text-accent-300 hover:underline">
           Show more
