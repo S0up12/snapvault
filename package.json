@@ -1,7 +1,7 @@
 {
   "name": "snapvault",
   "private": true,
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "Snapvault - a self-hosted, offline-first desktop viewer for exported Snapchat data",
   "author": "S0up12",
   "license": "MIT",

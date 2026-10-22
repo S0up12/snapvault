@@ -2,7 +2,7 @@
 
 All notable changes to Snapvault. Format: [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.1.0-beta.3] - 2026-10-22
 
 ### Changed
 - The product name is spelled "Snapvault" everywhere (data location unchanged).
