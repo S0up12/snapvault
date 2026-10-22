@@ -1,6 +1,6 @@
 [package]
 name = "snapvault"
-version = "0.1.0"
+version = "0.1.0-beta.2"
 description = "SnapVault - a self-hosted, offline-first viewer for exported Snapchat data"
 authors = ["S0up12"]
 license = "MIT"
