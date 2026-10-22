@@ -90,7 +90,7 @@ pub fn init(logs_dir: PathBuf) -> Result<(), String> {
 }
 
 /// `YYYY-MM-DDTHH:MM:SSZ` from unix seconds (civil-from-days, no chrono).
-fn utc_timestamp(secs: u64) -> String {
+pub(crate) fn utc_timestamp(secs: u64) -> String {
     let (days, rem) = ((secs / 86400) as i64, secs % 86400);
     let z = days + 719468;
     let era = z.div_euclid(146097);

@@ -111,7 +111,7 @@ fn set_media_root_at(fixed_dir: &Path, chosen: Option<&Path>) -> Result<PathBuf,
 }
 
 /// Dirs that neither equal nor contain a valid media root (OS/system locations).
-fn system_dirs() -> Vec<PathBuf> {
+pub(crate) fn system_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = ["SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "ProgramData"]
         .iter()
         .filter_map(|key| std::env::var_os(key).map(PathBuf::from))
@@ -123,12 +123,23 @@ fn system_dirs() -> Vec<PathBuf> {
 }
 
 /// Dirs that may not be used themselves but may contain a media root (e.g. the profile root).
-fn protected_exact_dirs() -> Vec<PathBuf> {
+pub(crate) fn protected_exact_dirs() -> Vec<PathBuf> {
     ["USERPROFILE", "HOME"].iter().filter_map(|key| std::env::var_os(key).map(PathBuf::from)).collect()
 }
 
+/// Component-wise `starts_with` that ignores case on Windows (env vars like
+/// SystemRoot are upper-case while users type `C:/Windows`).
+pub(crate) fn path_starts_with(path: &Path, base: &Path) -> bool {
+    if cfg!(windows) {
+        let norm = |p: &Path| p.components().map(|c| c.as_os_str().to_string_lossy().to_lowercase()).collect::<Vec<_>>();
+        norm(path).starts_with(&norm(base))
+    } else {
+        path.starts_with(base)
+    }
+}
+
 /// Pure path checks: absolute, not a filesystem root, not inside `system`, not equal to `exact`.
-fn validate_media_root(path: &Path, system: &[PathBuf], exact: &[PathBuf]) -> Result<(), String> {
+pub(crate) fn validate_media_root(path: &Path, system: &[PathBuf], exact: &[PathBuf]) -> Result<(), String> {
     if !path.is_absolute() {
         return Err(format!("Storage location must be an absolute path: {}", path.display()));
     }
@@ -139,10 +150,10 @@ fn validate_media_root(path: &Path, system: &[PathBuf], exact: &[PathBuf]) -> Re
     if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
         return Err("Storage location cannot contain '..'.".to_string());
     }
-    if system.iter().any(|dir| path.starts_with(dir)) {
+    if system.iter().any(|dir| path_starts_with(path, dir)) {
         return Err(format!("{} is a system folder; choose another location.", path.display()));
     }
-    if exact.iter().any(|dir| path == dir.as_path()) {
+    if exact.iter().any(|dir| path_starts_with(path, dir) && path_starts_with(dir, path)) {
         return Err("Choose a subfolder, not your user profile folder itself.".to_string());
     }
     if path.exists() && !path.is_dir() {
@@ -343,6 +354,15 @@ mod tests {
         assert!(validate_media_root(&file, &sys, &[]).is_err());
         let root = base.ancestors().last().unwrap().to_path_buf();
         assert!(validate_media_root(&root, &[], &[]).is_err());
+    }
+
+    #[test]
+    fn path_starts_with_ignores_case_on_windows_only() {
+        let a = Path::new("C:/Windows/System32/x");
+        let b = Path::new(r"C:\WINDOWS");
+        assert_eq!(path_starts_with(a, b), cfg!(windows));
+        assert!(path_starts_with(Path::new("/tmp/a/b"), Path::new("/tmp/a")));
+        assert!(!path_starts_with(Path::new("/tmp/ab"), Path::new("/tmp/a")));
     }
 
     #[test]

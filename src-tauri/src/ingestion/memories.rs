@@ -268,9 +268,9 @@ fn repair_file_timestamps(paths: &[&Path], taken_at: &str) -> usize {
         .count()
 }
 
-fn set_file_times(path: &Path, time: SystemTime) -> std::io::Result<()> {
+pub(crate) fn set_file_times(path: &Path, time: SystemTime) -> std::io::Result<()> {
     let file = fs::OpenOptions::new().write(true).open(path)?;
-    let mut times = fs::FileTimes::new().set_modified(time);
+    let mut times = fs::FileTimes::new().set_modified(time).set_accessed(time);
     #[cfg(windows)]
     {
         use std::os::windows::fs::FileTimesExt;
@@ -281,7 +281,7 @@ fn set_file_times(path: &Path, time: SystemTime) -> std::io::Result<()> {
 
 /// Inverse of the `YYYY-MM-DDTHH:MM:SS.000Z` format `parse_snap_date`
 /// produces. Fixed-width fields again mean plain slicing suffices.
-fn parse_iso_to_system_time(iso: &str) -> Option<SystemTime> {
+pub(crate) fn parse_iso_to_system_time(iso: &str) -> Option<SystemTime> {
     if iso.len() != 24 {
         return None;
     }

@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 
+import ExportDialog from "../components/ExportDialog";
 import Lightbox from "../components/Lightbox";
 import type { LayoutOutletContext } from "../components/Layout";
 import MemoryTimelineScrubber from "../components/memories/MemoryTimelineScrubber";
@@ -15,6 +16,7 @@ export default function Memories() {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [tagEditorAsset, setTagEditorAsset] = useState<MemoryAsset | null>(null);
   const [visibleYear, setVisibleYear] = useState<number | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const {
     assets,
@@ -44,9 +46,24 @@ export default function Memories() {
 
   return (
     <section className="relative flex h-full min-h-0 w-full flex-col gap-3 overflow-hidden">
-      <p className="px-1 text-xs uppercase tracking-[0.22em] text-neutral-500">
-        {isLoading ? "Loading..." : `${total.toLocaleString()} ${total === 1 ? "memory" : "memories"}`}
-      </p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="px-1 text-xs uppercase tracking-[0.22em] text-neutral-500">
+          {isLoading ? "Loading..." : `${total.toLocaleString()} ${total === 1 ? "memory" : "memories"}`}
+        </p>
+        <button type="button" onClick={() => setExportOpen(true)} className="btn btn-secondary">
+          Export
+        </button>
+      </div>
+      {exportOpen ? (
+        <ExportDialog
+          kind="memories"
+          filter={filter}
+          tag={tag}
+          year={year}
+          count={isLoading ? undefined : total}
+          onClose={() => setExportOpen(false)}
+        />
+      ) : null}
 
       {error ? (
         <div className="rounded-md bg-red-500/8 px-4 py-3 text-sm text-red-300 ring-1 ring-red-400/25">{error}</div>

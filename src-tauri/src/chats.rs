@@ -293,6 +293,23 @@ fn load_window(
     })
 }
 
+/// Forward page (oldest first) of displayable messages strictly after `cursor`
+/// (None = from the start), same rows/filter as `list_chat_messages`. Returns the
+/// messages and the cursor for the next call (None when exhausted). Used by export.
+pub(crate) fn messages_after(
+    conn: &Connection,
+    thread_id: &str,
+    cursor: Option<&str>,
+    take: usize,
+) -> Result<(Vec<ChatMessageView>, Option<String>), String> {
+    let cur = cursor.map(parse_cursor).transpose()?;
+    let (rows, more) = fetch_rows(conn, thread_id, cur.as_ref(), true, false, take)?;
+    let next = if more { rows.last().map(|r| r.0.clone()) } else { None };
+    let mut messages: Vec<ChatMessageView> = rows.into_iter().map(|r| r.1).collect();
+    attach_media_and_filter(conn, &mut messages)?;
+    Ok((messages, next))
+}
+
 fn attach_media_and_filter(conn: &Connection, messages: &mut Vec<ChatMessageView>) -> Result<(), String> {
     // Media for this page only. Separate query rather than a JOIN: a JOIN
     // would repeat every non-media column per attachment.

@@ -3,9 +3,11 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import { mirrorToRust } from "./lib/ipc";
+import { initExportStore } from "./lib/exportStore";
 import { initJobStore } from "./lib/jobStore";
 
 initJobStore();
+initExportStore();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

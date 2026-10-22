@@ -1,5 +1,6 @@
 mod chats;
 mod db;
+mod export;
 mod log;
 mod ingestion;
 mod library;
@@ -13,6 +14,7 @@ use std::sync::Mutex;
 
 use chats::{list_chat_messages, list_chat_threads, search_chat_messages};
 use db::DbState;
+use export::{cancel_export, export_chats, export_memories, get_export_state};
 use ingestion::run_ingestion;
 use log::log_frontend;
 use library::{
@@ -76,6 +78,7 @@ pub fn run() {
             storage::widen_asset_protocol_scope(app.handle(), &media_root)?;
 
             app.manage(MediaProcessingState::default());
+            export::manage(app.handle());
             resume_pending_media_on_startup(app.handle().clone());
 
             Ok(())
@@ -113,6 +116,10 @@ pub fn run() {
             pause_media_processing,
             resume_media_processing,
             cancel_media_processing,
+            export_memories,
+            export_chats,
+            cancel_export,
+            get_export_state,
             log_frontend
         ])
         .run(tauri::generate_context!())

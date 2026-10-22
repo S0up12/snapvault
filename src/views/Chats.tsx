@@ -5,7 +5,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 
-import Lightbox, { type LightboxAsset } from "../components/Lightbox";
+import ExportDialog from "../components/ExportDialog";
+import Lightbox,{ type LightboxAsset } from "../components/Lightbox";
 import type { LayoutOutletContext } from "../components/Layout";
 import {
   avatarGradient,
@@ -90,6 +91,7 @@ export default function Chats() {
   const [query, setQuery] = useState("");
   const [jump, setJump] = useState<Jump | null>(null);
   const [thisChatOnly, setThisChatOnly] = useState(false);
+  const [exportTarget, setExportTarget] = useState<"this" | "all" | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const search = useChatSearch(thisChatOnly ? selectedThreadId : null);
   const selectedThread = threads.find((t) => t.id === selectedThreadId) ?? null;
@@ -154,6 +156,24 @@ export default function Chats() {
             </button>
           ) : null}
         </div>
+        <div className="mb-2.5 flex gap-2">
+          {selectedThread ? (
+            <button type="button" onClick={() => setExportTarget("this")} className="btn btn-secondary flex-1">
+              Export this chat
+            </button>
+          ) : null}
+          <button type="button" onClick={() => setExportTarget("all")} className="btn btn-secondary flex-1">
+            Export all chats
+          </button>
+        </div>
+        {exportTarget ? (
+          <ExportDialog
+            kind="chats"
+            threadId={exportTarget === "this" && selectedThread ? selectedThread.id : null}
+            label={exportTarget === "this" && selectedThread ? selectedThread.display_name : "all chats"}
+            onClose={() => setExportTarget(null)}
+          />
+        ) : null}
         {selectedThread ? (
           <label className="mb-2.5 flex items-center gap-2 text-xs text-neutral-400">
             <input type="checkbox" checked={thisChatOnly} onChange={(event) => setThisChatOnly(event.target.checked)} />

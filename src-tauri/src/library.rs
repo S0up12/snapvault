@@ -240,26 +240,48 @@ fn media_filter_clause(filter: &str) -> &'static str {
     }
 }
 
+/// Single source of truth for which memory rows a (filter, tag, year) selects;
+/// used by the grid (count + page) and by export so they cannot diverge.
+pub(crate) fn memory_where(filter: &str, tag: Option<&str>, year: Option<i32>) -> String {
+    format!(
+        "source_type = 'memory' {} {} {}",
+        media_filter_clause(filter),
+        if tag.is_some() { TAG_FILTER_CLAUSE } else { "" },
+        if year.is_some() { YEAR_FILTER_CLAUSE } else { "" },
+    )
+}
+
+/// Bound values for `memory_where`'s named placeholders.
+pub(crate) struct FilterParams {
+    tag: Option<String>,
+    year: Option<String>,
+}
+
+impl FilterParams {
+    pub(crate) fn new(tag: Option<&str>, year: Option<i32>) -> Self {
+        Self { tag: tag.map(str::to_string), year: year.map(|y| format!("{y:04}")) }
+    }
+
+    pub(crate) fn named(&self) -> Vec<(&str, &dyn ToSql)> {
+        let mut params: Vec<(&str, &dyn ToSql)> = Vec::new();
+        if let Some(tag) = &self.tag {
+            params.push((":tag", tag));
+        }
+        if let Some(year) = &self.year {
+            params.push((":year", year));
+        }
+        params
+    }
+}
+
 const TAG_FILTER_CLAUSE: &str = "AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value = :tag)";
 const YEAR_FILTER_CLAUSE: &str = 
     "AND taken_at >= :year AND taken_at < CAST(CAST(:year AS INTEGER) + 1 AS TEXT)"; // sargable; ISO text sorts by year prefix
 
 fn count_matching(conn: &Connection, filter: &str, tag: Option<&str>, year: Option<i32>) -> Result<i64, String> {
-    let sql = format!(
-        "SELECT COUNT(*) FROM assets WHERE source_type = 'memory' {} {} {}",
-        media_filter_clause(filter),
-        if tag.is_some() { TAG_FILTER_CLAUSE } else { "" },
-        if year.is_some() { YEAR_FILTER_CLAUSE } else { "" },
-    );
-    let year_str = year.map(|y| format!("{y:04}"));
-    let mut params: Vec<(&str, &dyn ToSql)> = Vec::new();
-    if let Some(tag) = tag.as_ref() {
-        params.push((":tag", tag));
-    }
-    if let Some(year_str) = &year_str {
-        params.push((":year", year_str));
-    }
-    conn.query_row(&sql, &params[..], |row| row.get(0)).map_err(|err| err.to_string())
+    let sql = format!("SELECT COUNT(*) FROM assets WHERE {}", memory_where(filter, tag, year));
+    let fp = FilterParams::new(tag, year);
+    conn.query_row(&sql, &fp.named()[..], |row| row.get(0)).map_err(|err| err.to_string())
 }
 
 fn load_page(
@@ -275,25 +297,17 @@ fn load_page(
     let sql = format!(
         "SELECT id, media_type, original_path, overlay_path, thumbnail_path, playback_path, taken_at, is_favorite, tags
          FROM assets
-         WHERE source_type = 'memory' {media} {tag_clause} {year_clause}
+         WHERE {where_clause}
          ORDER BY taken_at {order}, id {order}
          LIMIT :limit OFFSET :offset",
-        media = media_filter_clause(filter),
-        tag_clause = if tag.is_some() { TAG_FILTER_CLAUSE } else { "" },
-        year_clause = if year.is_some() { YEAR_FILTER_CLAUSE } else { "" },
+        where_clause = memory_where(filter, tag, year),
         order = order,
     );
 
     let mut stmt = conn.prepare(&sql).map_err(|err| err.to_string())?;
 
-    let year_str = year.map(|y| format!("{y:04}"));
-    let mut params: Vec<(&str, &dyn ToSql)> = Vec::new();
-    if let Some(tag) = tag.as_ref() {
-        params.push((":tag", tag));
-    }
-    if let Some(year_str) = &year_str {
-        params.push((":year", year_str));
-    }
+    let fp = FilterParams::new(tag, year);
+    let mut params = fp.named();
     params.push((":limit", &limit));
     params.push((":offset", &offset));
 
@@ -316,6 +330,12 @@ fn load_page(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|err| err.to_string())?;
     Ok(rows)
+}
+
+/// Test helper: ids the grid would list (asc, same order as export).
+#[cfg(test)]
+pub(crate) fn list_for_test(conn: &Connection, filter: &str, tag: Option<&str>, year: Option<i32>) -> Vec<String> {
+    load_page(conn, 0, i64::MAX, "asc", filter, tag, year).unwrap().into_iter().map(|a| a.id).collect()
 }
 
 #[cfg(test)]

@@ -28,7 +28,7 @@ const PLAYBACK_SAFE_EXTENSIONS: &[&str] = &["mp4", "m4v"];
 /// Spawns `program` without flashing a console window. ffmpeg/ffprobe are
 /// console-subsystem binaries, so a plain `Command::new` pops a visible
 /// window on Windows every time this GUI app spawns one.
-fn no_window_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+pub(crate) fn no_window_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let mut cmd = Command::new(program);
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
@@ -44,7 +44,7 @@ fn sidecar_in(exe_dir: &Path, name: &str, exists: impl Fn(&Path) -> bool) -> Opt
 
 /// Bundled sidecar (Tauri puts externalBin next to the app exe) when present,
 /// else the bare name so PATH lookup keeps dev/CI working.
-fn ffmpeg_program(name: &str) -> std::ffi::OsString {
+pub(crate) fn ffmpeg_program(name: &str) -> std::ffi::OsString {
     std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().and_then(|dir| sidecar_in(dir, name, |p| p.is_file())))
@@ -1401,10 +1401,14 @@ fn generate_one_thumbnail(asset: &PendingAsset, output_path: &Path, settings: &P
     run_thumbnail_ffmpeg(&input, None, output_path, settings)
 }
 
+/// Shared overlay graph: sizes the overlay to the base frame, then composites.
+/// rw/rh size the overlay to the base frame (iw/ih were a no-op).
+pub(crate) const OVERLAY_GRAPH: &str = "[1:v][0:v]scale2ref=w=rw:h=rh[ovr][base];[base][ovr]overlay=format=auto";
+
 /// Overlay must exist, be non-trivial in size and start with the PNG magic
 /// bytes; Snapchat occasionally exports truncated/non-PNG overlay files that
 /// make ffmpeg fail with "Cannot determine format of input".
-fn overlay_is_usable(path: &Path) -> bool {
+pub(crate) fn overlay_is_usable(path: &Path) -> bool {
     use std::io::Read;
     let Ok(mut file) = std::fs::File::open(path) else {
         return false;
@@ -1436,7 +1440,7 @@ fn run_thumbnail_ffmpeg(
             "1",
             "-filter_complex",
             &format!(
-                "[1:v][0:v]scale2ref=w=rw:h=rh[ovr][base];[base][ovr]overlay=format=auto,scale={THUMBNAIL_SIZE}:force_original_aspect_ratio=decrease:flags=lanczos"
+                "{OVERLAY_GRAPH},scale={THUMBNAIL_SIZE}:force_original_aspect_ratio=decrease:flags=lanczos"
             ),
         ]);
     } else {

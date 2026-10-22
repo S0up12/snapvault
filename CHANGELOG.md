@@ -5,6 +5,7 @@ All notable changes to SnapVault. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Added
+- Export: memories to a folder (overlays composited onto photos, original dates on the files, organized by year/month) and chats as HTML, text or JSON, with cancel and a global progress strip.
 - Chat search: full-text search (SQLite FTS5) across all messages with highlighted snippets, optional per-chat scope, and jump-to-message with loading in both directions. Shortcuts: `/` and Ctrl+K.
 - Bundled ffmpeg/ffprobe in the installer (NSIS), with third-party notices; system ffmpeg remains the fallback.
 - Media processing control: pause, resume and cancel; hardware-accelerated video conversion (auto-detected, tested before use); convert-on-open mode.
@@ -22,6 +23,7 @@ All notable changes to SnapVault. Format: [Keep a Changelog](https://keepachange
 - Inter is bundled locally; a strict Content-Security-Policy and narrower plugin permissions are in place.
 
 ### Fixed
+- Folder checks for the media location and exports now ignore letter case on Windows, so system folders are rejected however the path is typed.
 - Corrupt videos are marked unplayable once instead of failing on every launch; the playback stats are accurate.
 - Memories tiles open the viewer when clicking the bottom strip again; import and thumbnail progress survive switching views.
 - A bad overlay image no longer fails the whole thumbnail; failed thumbnails are not retried on every launch.

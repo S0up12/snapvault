@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 
+import ExportStatus from "./ExportStatus";
 import NavBar from "./NavBar";
 import TitleBar from "./TitleBar";
 import { useMemoryTags, useMemoryYears } from "../hooks/useMemories";
@@ -53,6 +54,7 @@ export default function Layout() {
     <div className="flex h-screen flex-col overflow-hidden bg-bg text-fg">
       <TitleBar />
       <NavBar memoriesFilters={context.memoriesFilters} chatsFilters={context.chatsFilters} />
+      <ExportStatus />
 
       <main
         className={[
