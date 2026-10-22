@@ -1,29 +1,37 @@
-# Backlog (updated 2026-10-21)
+# Backlog (pruned 2026-10-22)
 
-## Features / larger work
-- [ ] Bundle ffmpeg/ffprobe as a Tauri sidecar (today: expected on PATH; Dashboard warns via check_ffmpeg).
+Legend: **[1.0]** = must be done before the first full release. Everything else can ship after 1.0.
+
+## Release gates (not code)
+- [ ] **[1.0]** 2-3 people other than the author import their own exports without problems (different sizes, split zips, missing JSON).
+- [ ] **[1.0]** Clean-machine install: fresh Windows profile or VM; install, import, close, reopen, upgrade from the previous beta (also covers the 'SnapVault' -> 'Snapvault' productName change; Windows is case-insensitive so it should upgrade in place - unverified).
+- [ ] **[1.0]** Decide on code signing (unsigned installer shows a SmartScreen warning).
+- [ ] No known data-loss or corruption bugs open for a week of use.
+
+## Correctness / data safety
+- [ ] **[1.0]** Timestamp pairing: real exports have EMPTY download links (no `mid`), so pairing is by kind then day order. Kind-aware pairing + unpaired fallback verified live; remaining ambiguity = several same-kind items in one day (cannot be solved without a key from Snapchat; accept and document).
+- [x] **[1.0]** Re-import leaves the freshly extracted `imports/<job>` as an orphan (GBs on large exports); prune unreferenced files after ingestion.
+- [x] **[1.0]** Existing chat rows have NULL `external_id`: first re-import after upgrade duplicates them once (needs a backfill migration).
+- [x] **[1.0]** Reset / media-root move blocked during an import (IngestionGuard, 2026-10-22).
+- [x] **[1.0]** Skipped unsafe zip entries are shown in the import UI (verified live 2026-10-22).
+- [x] **[1.0]** Auto hardware acceleration benchmarked 2026-10-22 on a 1080x1920 BT.709 HEVC clip: AMF qp retuned 23 -> 28 (size/quality parity with x264); no speed gain vs unrestricted x264 on a 20-thread CPU, ~20% vs the half-thread limit-CPU mode, main win is CPU offload. NVENC/QSV args unmeasured (no hardware).
+- [x] **[1.0]** Dialog focus returns to the opener after Escape (verified live for the Lightbox tile and the Export button; virtualized tiles that unmount fall back to body).
+
+## Features (post-1.0)
 - [ ] Stories: tables exist, nothing writes them, `snap_history.json` is skipped; nav item hidden (route still in App.tsx).
-- [ ] Chat overlays are never composited; video+overlay compositing missing.
-- [ ] Cancel/pause/resume for import and thumbnail runs; `ingestion_jobs` is never written.
+- [ ] Overlays are only composited for thumbnails and photo exports: not in the full-size viewer, chat media or exported videos.
+- [ ] Cancel for an import's extraction phase; `ingestion_jobs` is never written (no import history).
+- [ ] Auto-updater (needs signing keys); bundle first, updater right after 1.0.
+- [ ] Other export/library ideas: on-this-day, stats, duplicate finder (checksum column unused), remove-from-library, places view, app lock.
+
+## Quality / tech debt (post-1.0)
 - [ ] Typed/streaming chat JSON parsing (Value tree is ~4.4x file size; see decisions.md).
 - [ ] Generate TS types from Rust (ts-rs/specta) instead of hand-mirroring.
-
-## Known gaps / small fixes
-- [ ] Skipped unsafe zip entries are only logged; surface the count in the import UI.
-- [ ] Re-import leaves the freshly extracted `imports/<job>` dir as an orphan.
-- [ ] Existing chat rows have NULL `external_id`: first re-import after upgrade duplicates them once.
-- [ ] Reset during zip extraction is not blocked (ingestion holds the media slot only in its media phase).
-- [ ] Timestamp pairing is Nth-of-day; check whether the JSON Download Link has a media id to match on.
-- [ ] Memories tile: favorite/tag strip no longer passes clicks through to the tile.
-- [ ] Dialogs: focus return to the opener after Escape not confirmed.
-- [ ] `openUrl` permission is any http(s) (chat links need it); consider confirm-before-open.
-- [ ] Windows prefix match in `to_relative` may be case-sensitive.
-- [ ] One corrupt export video (moov atom missing) keeps logging a transcode error; mark it unplayable.
 - [ ] No frontend test runner; add Vitest + a few hook/component tests.
-- [ ] Unverified: CSP effect on photo lightbox, dialogs, GitHub link.
+- [ ] `openUrl` permission is any http(s) (chat links need it); consider confirm-before-open.
+- [ ] Emoji-only chat searches return nothing (FTS tokenizer limitation).
+- [ ] Unverified live: photo lightbox under the CSP, native dialogs, the GitHub link.
+- [ ] Published release titles/notes still say 'SnapVault'.
 
-## Added 2026-10-21 (processing control)
-- [ ] Settings stat 'Videos pending conversion' counts any video with NULL playback_path, including playable H.264 (maintenance.rs ~50); count only assets that actually need a transcode.
-- [ ] Hardware transcode (AMF verified working on RX 6700 XT; NVENC/QSV listed but not working here) is unmeasured on real HEVC: benchmark speed and file size (AMF cqp output was ~2.2x larger than x264 on a synthetic clip).
-- [ ] Import UI should show a 'media phase cancelled' note (IngestionSummary.media_cancelled exists, UI ignores it).
-- [ ] Browser-safe videos never get a playback_path, so each Lightbox open runs an ffprobe; record it once.
+## Done (kept short for reference)
+Bundled ffmpeg sidecar, pause/resume/cancel for media processing, hardware-accelerated + on-open transcode, corrupt videos marked once, accurate playback stats, record playable originals' playback_path, media_cancelled note, tile click strip fix, case-insensitive path checks, chat search, export (memories + chats), CI/release workflows, relative media paths, versioned migrations, logging with redaction.

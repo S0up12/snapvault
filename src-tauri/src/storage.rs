@@ -224,6 +224,7 @@ pub fn get_storage_info(app: AppHandle) -> Result<StorageInfo, String> {
 /// root-relative, but the files still live under the old root).
 #[tauri::command]
 pub fn set_media_root(app: AppHandle, state: tauri::State<DbState>, path: Option<String>) -> Result<String, String> {
+    crate::ingestion::ensure_no_import()?;
     let _slot = crate::thumbnails::MediaSlot::try_acquire(&app)
         .ok_or_else(|| "Media processing or an import is running; try again when it finishes.".to_string())?;
     let conn = state.0.lock().map_err(|err| err.to_string())?;

@@ -22,6 +22,7 @@ import { useLibraryStats } from "../hooks/useLibraryStats";
 import { useHwEncoders, usePerformanceSettings, type PerformanceSettings, type TranscodePreset } from "../hooks/usePerformanceSettings";
 import { useProfile } from "../hooks/useProfile";
 import { useStorageInfo } from "../hooks/useStorageSettings";
+import { useBackendBusy } from "../lib/jobStore";
 import { useViewerSettings } from "../hooks/useViewerSettings";
 
 type VerifySummary = {
@@ -227,7 +228,9 @@ function StorageLocationPanel() {
   const { stats } = useLibraryStats();
   const [showChoiceModal, setShowChoiceModal] = useState(false);
 
+  const { busy, ingesting } = useBackendBusy();
   const hasAssets = (stats?.total_assets ?? 0) > 0;
+  const locked = busy || ingesting;
 
   return (
     <Panel
@@ -261,7 +264,7 @@ function StorageLocationPanel() {
             <button
               type="button"
               onClick={() => setShowChoiceModal(true)}
-              disabled={hasAssets}
+              disabled={hasAssets || locked}
               className="btn btn-primary disabled:cursor-not-allowed"
             >
               <FolderCog className="h-4 w-4" />
@@ -269,7 +272,9 @@ function StorageLocationPanel() {
             </button>
           </div>
 
-          {hasAssets ? (
+          {locked ? (
+            <p className="mt-3 text-xs text-neutral-500">Disabled while an import is running</p>
+          ) : hasAssets ? (
             <p className="mt-3 text-xs text-neutral-500">
               Reset the library in the Danger Zone below before changing the storage location.
             </p>
@@ -583,7 +588,8 @@ function VerifyLibraryPanel() {
       setStatus("done");
     } catch (err) {
       setError(String(err));
-      setStatus("error");
+      setStatus("idle");
+      if (!String(err).includes("import is running")) setStatus("error");
     }
   }
 
@@ -655,6 +661,7 @@ function AboutPanel() {
 }
 
 function DangerZonePanel() {
+  const { busy, ingesting } = useBackendBusy();
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
@@ -680,11 +687,13 @@ function DangerZonePanel() {
 
   return (
     <Panel kicker="Danger zone" title="Reset everything" description="Wipe the database and every extracted/generated file, so you can re-import from a clean slate.">
-      <button type="button" onClick={handleReset} disabled={status === "running"} className="btn btn-danger disabled:cursor-not-allowed">
+      <button type="button" onClick={handleReset} disabled={status === "running" || busy || ingesting} className="btn btn-danger disabled:cursor-not-allowed">
         {status === "running" ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
         {status === "running" ? "Resetting..." : "Reset library & start over"}
       </button>
 
+      {busy || ingesting ? <p className="mt-3 text-xs text-neutral-500">Disabled while an import is running</p> : null}
+      {status === "idle" && error ? <p className="mt-3 text-xs text-neutral-400">{error}</p> : null}
       {status === "done" ? (
         <p className="mt-3 text-sm text-emerald-300">Library reset. Go to the Dashboard to import a fresh export.</p>
       ) : null}

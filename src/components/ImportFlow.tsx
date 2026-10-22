@@ -18,11 +18,11 @@ const STEPS: { key: Phase; label: string }[] = [
 ];
 
 export default function ImportFlow() {
-  const { status, activePhase, phaseMessage, phasePercent, donePhases, summary, error, backendBusy, mediaState } =
+  const { status, activePhase, phaseMessage, phasePercent, donePhases, summary, error, backendBusy, ingesting, mediaState } =
     useIngestionJob();
   const media = useThumbnailJob();
   const [storageChoice, setStorageChoice] = useState<{ defaultPath: string } | null>(null);
-  const busy = status === "running" || backendBusy;
+  const busy = status === "running" || backendBusy || ingesting;
 
   async function handleSelectFile() {
     const storageInfo = await invokeLogged<StorageInfo>("get_storage_info");
@@ -46,6 +46,23 @@ export default function ImportFlow() {
     const archivePaths = Array.isArray(selected) ? selected : [selected];
 
     void startIngestion(archivePaths);
+  }
+
+  const notes: string[] = [];
+  if (summary && status === "completed") {
+    if (summary.skipped_entries > 0) {
+      notes.push(
+        `${summary.skipped_entries} file(s) in the export were skipped because their names were unsafe or invalid (they cannot be extracted safely on Windows). Everything else was imported.`,
+      );
+    }
+    if (summary.media_cancelled) {
+      notes.push(
+        "Import finished, but media processing was cancelled - thumbnails and video conversions are still queued. Use Reprocess media in Settings > Performance to finish them.",
+      );
+    }
+    if ((summary.pruned_bytes ?? 0) > 0) {
+      notes.push(`Freed ${((summary.pruned_bytes ?? 0) / (1024 * 1024)).toFixed(1)} MB of duplicate extracted files.`);
+    }
   }
 
   return (
@@ -72,7 +89,9 @@ export default function ImportFlow() {
       </button>
 
       {backendBusy && status !== "running" ? (
-        <p className="mt-3 text-xs text-neutral-400">Media processing is running in the background</p>
+        <p className="mt-3 text-xs text-neutral-400">
+          {ingesting ? "An import is running in the background" : "Media processing is running in the background"}
+        </p>
       ) : null}
 
       <MediaJobControls mediaState={mediaState} />
@@ -181,11 +200,12 @@ export default function ImportFlow() {
             <Stat label="Thumbnails generated" value={summary.thumbnails_generated} />
             <Stat label="Videos converted" value={summary.playback_transcoded} />
           </div>
-          {summary.media_cancelled ? (
-            <p className="mt-3 text-xs text-amber-300">
-              Import finished, but media processing was cancelled - thumbnails and video conversions are still
-              queued. Use Reprocess media in Settings &gt; Performance to finish them.
-            </p>
+          {notes.length > 0 ? (
+            <ul className="mt-3 list-disc space-y-1 pl-4 text-xs text-amber-300">
+              {notes.map((note) => (
+                <li key={note}>{note}</li>
+              ))}
+            </ul>
           ) : null}
         </div>
       ) : null}

@@ -510,7 +510,7 @@ impl HwEncoder {
             Self::Nvenc => &["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23", "-pix_fmt", "yuv420p"],
             Self::Qsv => &["-c:v", "h264_qsv", "-global_quality", "23", "-preset", "medium", "-pix_fmt", "nv12"],
             Self::Amf => &[
-                "-c:v", "h264_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "23", "-qp_p", "23", "-qp_b", "23", "-pix_fmt", "yuv420p",
+                "-c:v", "h264_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "28", "-qp_p", "28", "-qp_b", "28", "-pix_fmt", "yuv420p",
             ],
         }
     }
@@ -1007,13 +1007,9 @@ impl MediaSlot {
     pub(crate) fn try_acquire(app: &AppHandle) -> Option<MediaSlot> {
         app.state::<MediaProcessingState>().ctl.try_start().then(|| MediaSlot(app.clone()))
     }
-
-    /// Non-acquiring: true while any slot is held.
-    pub(crate) fn is_busy(app: &AppHandle) -> bool {
-        app.state::<MediaProcessingState>().is_busy()
-    }
 }
 
+#[cfg(test)]
 impl MediaProcessingState {
     fn is_busy(&self) -> bool {
         self.ctl.state() != RunState::Idle
@@ -1023,13 +1019,21 @@ impl MediaProcessingState {
 #[derive(Serialize)]
 pub struct MediaStateView {
     pub state: &'static str,
+    /// Media slot busy OR an import is running.
     pub busy: bool,
+    pub ingesting: bool,
+}
+
+/// busy = media slot busy OR ingestion active.
+fn media_busy(state: RunState, ingesting: bool) -> bool {
+    state != RunState::Idle || ingesting
 }
 
 #[tauri::command]
 pub fn get_media_state(app: AppHandle) -> Result<MediaStateView, String> {
     let state = media_ctl(&app).state();
-    Ok(MediaStateView { state: state.as_str(), busy: state != RunState::Idle })
+    let ingesting = crate::ingestion::is_active();
+    Ok(MediaStateView { state: state.as_str(), busy: media_busy(state, ingesting), ingesting })
 }
 
 /// Takes effect after each worker's current asset finishes (a long transcode
@@ -1062,7 +1066,7 @@ pub fn cancel_media_processing(app: AppHandle) -> Result<(), String> {
 /// True while an import's media phase or a thumbnail run holds the slot.
 #[tauri::command]
 pub fn get_media_activity(app: AppHandle) -> Result<bool, String> {
-    Ok(MediaSlot::is_busy(&app))
+    Ok(media_busy(media_ctl(&app).state(), crate::ingestion::is_active()))
 }
 
 /// Polls up to 1 hour, then gives up with Err.
@@ -1480,6 +1484,14 @@ fn run_thumbnail_ffmpeg(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn busy_is_media_or_ingestion() {
+        assert!(!media_busy(RunState::Idle, false));
+        assert!(media_busy(RunState::Idle, true));
+        assert!(media_busy(RunState::Running, false));
+        assert!(media_busy(RunState::Paused, true));
+    }
 
     #[test]
     fn busy_flag_tracks_slot_state() {

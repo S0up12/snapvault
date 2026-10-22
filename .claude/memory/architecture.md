@@ -4,10 +4,11 @@ Stack: Tauri v2, Rust backend (`src-tauri/src`), React+TS+Tailwind frontend (`sr
 
 ## Backend modules (`src-tauri/src`)
 - `lib.rs` - app setup, `generate_handler!` registry (all commands listed here)
-- `db/` - `mod.rs` (DbState, versioned `MIGRATIONS` via `PRAGMA user_version`; to change schema append a fn to the end of the list, never edit `schema.rs`, which is the frozen v1 baseline), `schema.rs` (tables below)
+- `db/` - `mod.rs` (DbState, versioned `MIGRATIONS` (now v1-v5; v5 = chat external_id backfill) via `PRAGMA user_version`; to change schema append a fn to the end of the list, never edit `schema.rs`, which is the frozen v1 baseline), `schema.rs` (tables below)
 - `log.rs` - `log::log_info!/log_warn!/log_error!` -> stderr + `app_data/logs/snapvault.log` (2MB x2 rotation); `log_frontend(level, message)` command. Log ids/counts only, never paths or user content.
-- `ingestion/` - `mod.rs` (`run_ingestion`, zip extract, `ingestion://progress`), `memories.rs`, `chats.rs`, `profile.rs`
+- `ingestion/` - `mod.rs` (`run_ingestion`, zip extract, `prune_unreferenced`, `ingestion://progress`; IngestionSummary has `pruned_files`/`pruned_bytes`), `memories.rs`, `chats.rs`, `profile.rs`
 - `thumbnails.rs` - ffmpeg thumbnails (360px webp), HEVC->h264 playback copies, overlay compositing, `thumbnails://progress`, media-processing slot lock
+- `ingestion/mod.rs` - also `IngestionGuard` (static AtomicBool) held for the whole `run_ingestion`; second run -> Err; `get_media_state.busy` includes it, plus `ingesting`
 - `library.rs` - memory queries (assets, tags, years, year offset, favorites)
 - `chats.rs`, `profile.rs`, `maintenance.rs` (stats/verify/reset), `settings.rs` (performance + viewer), `storage.rs` (media root)
 

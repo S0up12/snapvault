@@ -35,6 +35,10 @@ struct MemoryGroup {
 
 struct JsonMemoryItem {
     day_key: String,
+    /// Lowercased `mid` from the entry's download link (== file stem id).
+    media_id: Option<String>,
+    /// "image" / "video" from `Media Type` (None when unknown).
+    kind: Option<&'static str>,
     taken_at: Option<String>,
     latitude: Option<f64>,
     longitude: Option<f64>,
@@ -105,28 +109,10 @@ pub(super) fn parse_memories_blocking(
     let mut days: Vec<_> = groups_by_day.into_iter().collect();
     days.sort_by(|a, b| a.0.cmp(&b.0));
     for (day_key, groups) in days {
-        // The legacy repair script keyed on zip member path + zip mtime; here
-        // JSON has no filename, so pairing is Nth-of-day and only trustworthy
-        // when the per-day counts agree. On mismatch don't guess: leave the
-        // day's files unpaired (day-level date) and log the counts.
-        let day_items = json_by_day.get(&day_key);
-        let paired = day_items.filter(|items| items.len() == groups.len());
-        // On mismatch still apply what is safe day-wide: location only when
-        // every JSON entry that day agrees (date is already the day key).
-        let mut day_location: Option<(f64, f64)> = None;
-        if let (Some(items), None) = (day_items, paired) {
-            crate::log::log_warn!(
-                "[ingestion] memories day {day_key}: {} JSON entries vs {} files, no per-file pairing (day-level data only)",
-                items.len(),
-                groups.len()
-            );
-            let first = items.first().and_then(|i| i.latitude.zip(i.longitude));
-            if items.iter().all(|i| i.latitude.zip(i.longitude) == first) {
-                day_location = first;
-            }
-        }
+        let day_items: &[JsonMemoryItem] = json_by_day.get(&day_key).map_or(&[], |v| v.as_slice());
+        let (pairing, day_location) = pair_day(&day_key, day_items, &groups);
         for (index, group) in groups.into_iter().enumerate() {
-            let item = paired.and_then(|items| items.get(index));
+            let item = pairing[index].map(|i| &day_items[i]);
             if item.is_some() {
                 matched += 1;
             } else {
@@ -196,6 +182,106 @@ pub(super) fn parse_memories_blocking(
     })
 }
 
+/// Pairs one day's JSON entries with its files. Entries whose `mid` equals a
+/// file's stem id pair by id (order-independent). The rest fall back to
+/// per-kind (image/video) Nth-of-day when that kind's counts agree, then
+/// whole-day Nth-of-day (entries by time, files by mtime/stem) only when no kind's
+/// counts disagreed (disagreement proves the order assumption wrong) and the
+/// leftover counts agree; otherwise they stay unpaired, with a day-level location
+/// when every leftover entry agrees. Returns per-group item index.
+fn pair_day(
+    day_key: &str,
+    items: &[JsonMemoryItem],
+    groups: &[MemoryGroup],
+) -> (Vec<Option<usize>>, Option<(f64, f64)>) {
+    let mut result: Vec<Option<usize>> = vec![None; groups.len()];
+    let mut claimed = vec![false; items.len()];
+    let mut by_id: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (i, item) in items.iter().enumerate() {
+        if let Some(id) = item.media_id.as_deref() {
+            by_id.entry(id).or_default().push(i);
+        }
+    }
+    for (g, group) in groups.iter().enumerate() {
+        let Some(id) = group_media_id(&group.stem) else { continue };
+        if let Some(i) = by_id.get(id.as_str()).and_then(|l| l.iter().copied().find(|&i| !claimed[i])) {
+            claimed[i] = true;
+            result[g] = Some(i);
+        }
+    }
+    let mut left_items: Vec<usize> = (0..items.len()).filter(|&i| !claimed[i]).collect();
+    let mut left_groups: Vec<usize> = (0..groups.len()).filter(|&g| result[g].is_none()).collect();
+    let mut kind_disagrees = false;
+    // Type-aware stage: Image/Video entries only pair with same-kind files, and
+    // only when that kind's counts agree (no cross-kind mis-assignment).
+    for kind in ["image", "video"] {
+        let ki: Vec<usize> = left_items.iter().copied().filter(|&i| items[i].kind == Some(kind)).collect();
+        let kg: Vec<usize> = left_groups.iter().copied().filter(|&g| group_kind(&groups[g]) == kind).collect();
+        kind_disagrees |= ki.len() != kg.len();
+        if !ki.is_empty() && ki.len() == kg.len() {
+            for (&g, &i) in kg.iter().zip(&ki) {
+                result[g] = Some(i);
+                claimed[i] = true;
+            }
+            left_items.retain(|i| !claimed[*i]);
+            left_groups.retain(|&g| result[g].is_none());
+        }
+    }
+    if !kind_disagrees && left_items.len() == left_groups.len() {
+        for (&g, &i) in left_groups.iter().zip(&left_items) {
+            result[g] = Some(i);
+        }
+        return (result, None);
+    }
+    let mut location = None;
+    if !left_items.is_empty() {
+        crate::log::log_warn!(
+            "[ingestion] memories day {day_key}: {} unmatched JSON entries vs {} unmatched files, no per-file pairing (day-level data only)",
+            left_items.len(),
+            left_groups.len()
+        );
+        let loc = |i: usize| items[i].latitude.zip(items[i].longitude);
+        let first = loc(left_items[0]);
+        if left_items.iter().all(|&i| loc(i) == first) {
+            location = first;
+        }
+    }
+    (result, location)
+}
+
+fn entry_kind(media_type: &str) -> Option<&'static str> {
+    match media_type.trim().to_ascii_lowercase().as_str() {
+        "image" | "photo" => Some("image"),
+        "video" => Some("video"),
+        _ => None,
+    }
+}
+
+fn group_kind(group: &MemoryGroup) -> &'static str {
+    let ext = group.main_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    media_type_for_extension(ext)
+}
+
+/// `YYYY-MM-DD_<id>` -> lowercased `<id>` (None when there is no id part).
+fn group_media_id(stem: &str) -> Option<String> {
+    let id = stem.get(11..)?;
+    (stem.as_bytes().get(10) == Some(&b'_') && !id.is_empty()).then(|| id.to_ascii_lowercase())
+}
+
+/// Snapchat download links look like `https://.../dmd/memories?uid=..&sid=..&mid=<UUID>&..`.
+/// Anything without a plausible `mid` yields None (falls back to Nth-of-day).
+fn parse_media_id(raw: &Value) -> Option<String> {
+    ["Download Link", "Media Download Url"].iter().find_map(|key| {
+        let url = raw.get(*key)?.as_str()?;
+        let query = url.split_once('?')?.1.split('#').next()?;
+        let mid = query.split('&').find_map(|kv| kv.strip_prefix("mid="))?;
+        let ok = !mid.is_empty()
+            && mid.len() <= 128
+            && mid.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+        ok.then(|| mid.to_ascii_lowercase())
+    })
+}
+
 fn load_saved_media(part_dirs: &[PathBuf]) -> Result<Vec<JsonMemoryItem>, String> {
     let mut items = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -239,6 +325,8 @@ fn load_saved_media(part_dirs: &[PathBuf]) -> Result<Vec<JsonMemoryItem>, String
 
             items.push(JsonMemoryItem {
                 day_key,
+                media_id: parse_media_id(&raw),
+                kind: raw.get("Media Type").and_then(|v| v.as_str()).and_then(entry_kind),
                 taken_at: Some(taken_at),
                 latitude,
                 longitude,
@@ -769,4 +857,173 @@ mod tests {
         assert_eq!(asset_count_after, 2);
     }
 
+
+    fn link(mid: &str) -> String {
+        format!("https://app.snapchat.com/dmd/memories?uid=u&sid=s&mid={mid}&ts=1&sig=z")
+    }
+
+    fn setup_day(files: &[&str], entries: Vec<Value>) -> (Connection, PathBuf) {
+        let job_dir = tempdir();
+        let memories_dir = job_dir.join("part-000").join("memories");
+        let json_dir = job_dir.join("part-000").join("json");
+        fs::create_dir_all(&memories_dir).unwrap();
+        fs::create_dir_all(&json_dir).unwrap();
+        for f in files {
+            fs::write(memories_dir.join(f), b"x").unwrap();
+        }
+        let payload = serde_json::json!({ "Saved Media": entries });
+        fs::write(json_dir.join("memories_history.json"), payload.to_string()).unwrap();
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        (conn, job_dir)
+    }
+
+    fn taken(conn: &Connection, like: &str) -> String {
+        conn.query_row(
+            "SELECT taken_at FROM assets WHERE original_path LIKE ?1",
+            [like],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    fn e(date: &str, mid: Option<&str>) -> Value {
+        let mut v = serde_json::json!({ "Date": date, "Media Type": "Image" });
+        if let Some(m) = mid {
+            v["Download Link"] = Value::String(link(m));
+        }
+        v
+    }
+
+    #[test]
+    fn parses_mid_and_ignores_malformed_links() {
+        let id = |u: &str| parse_media_id(&serde_json::json!({ "Download Link": u }));
+        assert_eq!(id(&link("ABC-123")).as_deref(), Some("abc-123"));
+        assert_eq!(id("https://x/y?mid=Q1#frag").as_deref(), Some("q1"));
+        assert_eq!(id(""), None);
+        assert_eq!(id("not a url"), None);
+        assert_eq!(id("https://x/y?mid="), None);
+        assert_eq!(id("https://x/y?sid=1&xmid=2"), None);
+        assert_eq!(id("https://x/y?mid=a%20b"), None);
+        assert_eq!(parse_media_id(&serde_json::json!({ "Download Link": 5 })), None);
+        assert_eq!(
+            parse_media_id(&serde_json::json!({ "Download Link": "", "Media Download Url": link("zz") }))
+                .as_deref(),
+            Some("zz")
+        );
+        assert_eq!(group_media_id("2020-12-19_AbC").as_deref(), Some("abc"));
+        assert_eq!(group_media_id("2020-12-19"), None);
+    }
+
+    #[test]
+    fn id_match_beats_order() {
+        // Entries are earlier-first by time, but ids point the other way
+        // round vs. the files' mtime/stem order.
+        let (conn, job) = setup_day(
+            &["2020-12-19_aaa-main.jpg", "2020-12-19_bbb-main.jpg"],
+            vec![
+                e("2020-12-19 10:00:00 UTC", Some("BBB")),
+                e("2020-12-19 11:00:00 UTC", Some("aaa")),
+            ],
+        );
+        let s = parse_memories_blocking(&conn, &job, &|_, _, _| {}).unwrap();
+        assert_eq!(s.matched, 2);
+        assert_eq!(taken(&conn, "%aaa-main.jpg"), "2020-12-19T11:00:00.000Z");
+        assert_eq!(taken(&conn, "%bbb-main.jpg"), "2020-12-19T10:00:00.000Z");
+    }
+
+    #[test]
+    fn mixed_id_and_no_id_day_and_overlay_pairs_by_id() {
+        let (conn, job) = setup_day(
+            &[
+                "2020-12-19_aaa-main.jpg",
+                "2020-12-19_aaa-overlay.png",
+                "2020-12-19_ccc-main.jpg",
+            ],
+            vec![
+                e("2020-12-19 09:00:00 UTC", None),
+                e("2020-12-19 12:00:00 UTC", Some("aaa")),
+            ],
+        );
+        let s = parse_memories_blocking(&conn, &job, &|_, _, _| {}).unwrap();
+        assert_eq!((s.matched, s.unmatched_files, s.files_found), (2, 0, 2));
+        assert_eq!(taken(&conn, "%aaa-main.jpg"), "2020-12-19T12:00:00.000Z");
+        // No-id entry falls back to the only leftover file.
+        assert_eq!(taken(&conn, "%ccc-main.jpg"), "2020-12-19T09:00:00.000Z");
+        let ov: Option<String> = conn
+            .query_row("SELECT overlay_path FROM assets WHERE original_path LIKE '%aaa-main.jpg'", [], |r| r.get(0))
+            .unwrap();
+        assert!(ov.unwrap().ends_with("aaa-overlay.png"));
+    }
+
+    #[test]
+    fn leftover_count_mismatch_pairs_only_by_id() {
+        // aaa pairs by id; the two unknown-id entries vs one leftover file
+        // mismatch, so that file stays at the day-level date.
+        let (conn, job) = setup_day(
+            &["2020-12-19_aaa-main.jpg", "2020-12-19_zzz-main.jpg"],
+            vec![
+                e("2020-12-19 10:00:00 UTC", Some("aaa")),
+                e("2020-12-19 11:00:00 UTC", Some("nomatch1")),
+                e("2020-12-19 12:00:00 UTC", None),
+            ],
+        );
+        let s = parse_memories_blocking(&conn, &job, &|_, _, _| {}).unwrap();
+        assert_eq!((s.matched, s.unmatched_files), (1, 1));
+        assert_eq!(taken(&conn, "%aaa-main.jpg"), "2020-12-19T10:00:00.000Z");
+        assert_eq!(taken(&conn, "%zzz-main.jpg"), "2020-12-19T00:00:00.000Z");
+    }
+
+    fn ek(date: &str, kind: &str) -> Value {
+        serde_json::json!({ "Date": date, "Media Type": kind })
+    }
+
+    #[test]
+    fn type_aware_pairing_handles_interleaved_kinds() {
+        // Files sort a(photo) b(video) c(photo) by stem/mtime-tie; entries
+        // by time are photo, video, photo, but only kinds make this safe
+        // when the video is not in the middle of the file order.
+        let (conn, job) = setup_day(
+            &["2020-12-19_a-main.jpg", "2020-12-19_b-main.jpg", "2020-12-19_c-main.mp4"],
+            vec![
+                ek("2020-12-19 10:00:00 UTC", "Image"),
+                ek("2020-12-19 11:00:00 UTC", "Video"),
+                ek("2020-12-19 12:00:00 UTC", "Image"),
+            ],
+        );
+        let s = parse_memories_blocking(&conn, &job, &|_, _, _| {}).unwrap();
+        assert_eq!(s.matched, 3);
+        assert_eq!(taken(&conn, "%c-main.mp4"), "2020-12-19T11:00:00.000Z");
+        assert_eq!(taken(&conn, "%a-main.jpg"), "2020-12-19T10:00:00.000Z");
+        assert_eq!(taken(&conn, "%b-main.jpg"), "2020-12-19T12:00:00.000Z");
+    }
+
+    #[test]
+    fn per_kind_mismatch_leaves_other_kind_paired() {
+        // 2 image entries vs 1 image file (mismatch); video 1:1 pairs.
+        let (conn, job) = setup_day(
+            &["2020-12-19_a-main.jpg", "2020-12-19_v-main.mp4", "2020-12-19_w-main.mp4"],
+            vec![
+                ek("2020-12-19 10:00:00 UTC", "Image"),
+                ek("2020-12-19 11:00:00 UTC", "Image"),
+                ek("2020-12-19 12:00:00 UTC", "Video"),
+            ],
+        );
+        let s = parse_memories_blocking(&conn, &job, &|_, _, _| {}).unwrap();
+        // Both kinds disagree although the day total agrees (3 vs 3): the
+        // order assumption is wrong, so nothing is paired.
+        assert_eq!((s.matched, s.unmatched_files), (0, 3));
+        let (conn, job) = setup_day(
+            &["2020-12-19_a-main.jpg", "2020-12-19_v-main.mp4"],
+            vec![
+                ek("2020-12-19 10:00:00 UTC", "Image"),
+                ek("2020-12-19 11:00:00 UTC", "Image"),
+                ek("2020-12-19 12:00:00 UTC", "Video"),
+            ],
+        );
+        let s = parse_memories_blocking(&conn, &job, &|_, _, _| {}).unwrap();
+        assert_eq!((s.matched, s.unmatched_files), (1, 1));
+        assert_eq!(taken(&conn, "%v-main.mp4"), "2020-12-19T12:00:00.000Z");
+        assert_eq!(taken(&conn, "%a-main.jpg"), "2020-12-19T00:00:00.000Z");
+    }
 }

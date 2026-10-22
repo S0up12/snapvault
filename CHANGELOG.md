@@ -2,6 +2,19 @@
 
 All notable changes to Snapvault. Format: [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+- The product name is spelled "Snapvault" everywhere (data location unchanged).
+- Chats column redesigned: one search for chats and messages, an "All chats | This chat" switch, and a single Export entry.
+- Memories now pair with their files by photo/video kind within a day; days that cannot be paired reliably get the day-level date only.
+- AMD hardware encoding quality tuned to match the CPU encoder's size and quality.
+
+### Fixed
+- Re-importing an export no longer leaves duplicate extracted files on disk, and chats from earlier versions are not duplicated on the first re-import.
+- Reset and moving the library folder are blocked while an import is running; a second import cannot start.
+- Skipped unsafe zip entries are shown after an import; dialogs return focus to the button that opened them.
+
 ## [0.1.0-beta.2] - 2026-10-22
 
 ### Added

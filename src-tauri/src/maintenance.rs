@@ -124,6 +124,7 @@ fn verify_library_blocking(conn: &Connection, root: &Path) -> Result<VerifySumma
 pub async fn reset_library(app: AppHandle, state: tauri::State<'_, DbState>) -> Result<(), String> {
     // Held for the whole reset so media processing / ingestion's media phase
     // can't run against half-deleted state.
+    crate::ingestion::ensure_no_import()?;
     let _slot = crate::thumbnails::MediaSlot::try_acquire(&app)
         .ok_or_else(|| "Media processing or an import is running; try again when it finishes.".to_string())?;
     let media_root = crate::storage::resolve_media_root(&app)?;

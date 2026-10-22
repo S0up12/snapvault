@@ -667,4 +667,34 @@ mod tests {
         println!("file {} MB: {:?}, peak extra {} MB, retained {} MB", size >> 20, el, peak >> 20, live >> 20);
         assert_eq!(out["alice"].len(), 400_000);
     }
+
+    #[test]
+    fn reimport_after_v5_backfill_adds_no_duplicate_assets_or_links() {
+        let payload = serde_json::json!({ "friend1": [{
+            "From": "friend1", "Media Type": "MEDIA", "Created": "2026-07-07 22:44:03 UTC",
+            "Content": "", "Conversation Title": null, "IsSender": false,
+            "Created(microseconds)": 1783464243030i64, "Media IDs": "b~EiQSFabc"
+        }]});
+        let make_job = || {
+            let part_dir = part_dir_with_chat_history(&payload);
+            let media_dir = part_dir.join("chat_media");
+            fs::create_dir_all(&media_dir).unwrap();
+            fs::write(media_dir.join("2026-07-07_b~EiQSFabc.jpg"), b"x").unwrap();
+            part_dir.parent().unwrap().to_path_buf()
+        };
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&conn, &crate::db::MIGRATIONS[..4], Path::new("/none")).unwrap();
+        let first = parse_chats_blocking(&conn, &make_job(), &|_, _, _| {}).unwrap();
+        assert_eq!(first.media_assets_linked, 1);
+        // Legacy state: rows ingested before external_id was written.
+        conn.execute("UPDATE assets SET external_id = NULL", []).unwrap();
+        crate::db::migrate(&conn, crate::db::MIGRATIONS, Path::new("/none")).unwrap();
+
+        let second = parse_chats_blocking(&conn, &make_job(), &|_, _, _| {}).unwrap();
+        assert_eq!((second.messages_inserted, second.media_assets_linked), (0, 0));
+        let count = |t: &str| -> i64 {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |r| r.get(0)).unwrap()
+        };
+        assert_eq!((count("assets"), count("chat_message_assets"), count("chat_messages")), (1, 1, 1));
+    }
 }

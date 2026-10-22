@@ -52,6 +52,8 @@ export type IngestionSummary = {
   playback_transcoded: number;
   playback_failed: number;
   media_cancelled?: boolean;
+  pruned_files?: number;
+  pruned_bytes?: number;
 };
 
 type ThumbnailProgressEvent =
@@ -99,6 +101,7 @@ type Store = {
   ingestion: IngestionState;
   thumbnails: ThumbnailState;
   backendBusy: boolean;
+  ingesting: boolean;
   mediaState: MediaState;
 };
 
@@ -125,6 +128,7 @@ let state: Store = {
   ingestion: idleIngestion,
   thumbnails: idleThumbnails,
   backendBusy: false,
+  ingesting: false,
   mediaState: "idle",
 };
 const listeners = new Set<() => void>();
@@ -145,9 +149,12 @@ function setThumbnails(patch: Partial<ThumbnailState>): void {
 
 async function refreshBusy(): Promise<void> {
   try {
-    const m = await invokeLogged<{ state: MediaState; busy: boolean }>("get_media_state");
-    if (m.busy !== state.backendBusy || m.state !== state.mediaState) {
-      state = { ...state, backendBusy: m.busy, mediaState: m.state };
+    const m = await invokeLogged<{ state: MediaState; busy: boolean; ingesting?: boolean }>(
+      "get_media_state",
+    );
+    const ingesting = m.ingesting ?? false;
+    if (m.busy !== state.backendBusy || m.state !== state.mediaState || ingesting !== state.ingesting) {
+      state = { ...state, backendBusy: m.busy, ingesting, mediaState: m.state };
       listeners.forEach((l) => l());
     }
   } catch {
@@ -250,6 +257,12 @@ export async function startIngestion(archivePaths: string[]): Promise<void> {
     const result = await invokeLogged<IngestionSummary>("run_ingestion", { archivePaths });
     setIngestion({ summary: result, donePhases: new Set(ALL_PHASES), status: "completed" });
   } catch (err) {
+    if (String(err).includes("already running")) {
+      // Another import is in flight: not a failure, the busy notice covers it.
+      setIngestion({ ...idleIngestion, donePhases: new Set() });
+      void refreshBusy();
+      return;
+    }
     setIngestion({
       status: "error",
       error: state.ingestion.error ?? {
@@ -275,11 +288,22 @@ export async function startThumbnails(): Promise<void> {
   void refreshBusy();
 }
 
-export function useIngestionJob(): IngestionState & { backendBusy: boolean; mediaState: MediaState } {
+export function useIngestionJob(): IngestionState & {
+  backendBusy: boolean;
+  ingesting: boolean;
+  mediaState: MediaState;
+} {
   const ingestion = useSyncExternalStore(subscribe, () => state.ingestion);
   const backendBusy = useSyncExternalStore(subscribe, () => state.backendBusy);
+  const ingesting = useSyncExternalStore(subscribe, () => state.ingesting);
   const mediaState = useSyncExternalStore(subscribe, () => state.mediaState);
-  return { ...ingestion, backendBusy, mediaState };
+  return { ...ingestion, backendBusy, ingesting, mediaState };
+}
+
+export function useBackendBusy(): { busy: boolean; ingesting: boolean } {
+  const busy = useSyncExternalStore(subscribe, () => state.backendBusy);
+  const ingesting = useSyncExternalStore(subscribe, () => state.ingesting);
+  return { busy, ingesting };
 }
 
 export function useThumbnailJob(): ThumbnailState & { backendBusy: boolean; mediaState: MediaState } {

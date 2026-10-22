@@ -99,6 +99,51 @@ pub struct IngestionSummary {
     /// Media phase was cancelled; remaining media stays pending.
     #[serde(default)]
     pub media_cancelled: bool,
+    /// Extracted files nothing references (e.g. a fully deduped re-import) deleted from the job dir.
+    #[serde(default)]
+    pub pruned_files: usize,
+    #[serde(default)]
+    pub pruned_bytes: u64,
+}
+
+static INGESTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// RAII "an import is running" flag, held from the start of `run_ingestion`
+/// (before extraction) until it returns, errors or panics. Acquisition order:
+/// IngestionGuard first, then MediaSlot (media phase). `reset_library` /
+/// `set_media_root` check `is_active()` before taking the MediaSlot.
+pub(crate) struct IngestionGuard<'a>(&'a std::sync::atomic::AtomicBool);
+
+impl<'a> IngestionGuard<'a> {
+    fn acquire_in(flag: &'a std::sync::atomic::AtomicBool) -> Result<Self, String> {
+        use std::sync::atomic::Ordering::SeqCst;
+        flag.compare_exchange(false, true, SeqCst, SeqCst)
+            .map(|_| Self(flag))
+            .map_err(|_| "An import is already running.".to_string())
+    }
+}
+
+impl Drop for IngestionGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+pub(crate) fn is_active() -> bool {
+    INGESTING.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Err when an import is active (pure over the flag, for tests).
+fn ensure_no_import_in(flag: &std::sync::atomic::AtomicBool) -> Result<(), String> {
+    if flag.load(std::sync::atomic::Ordering::SeqCst) {
+        Err("An import is running; try again when it finishes.".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+pub(crate) fn ensure_no_import() -> Result<(), String> {
+    ensure_no_import_in(&INGESTING)
 }
 
 /// Media root for a job dir, which is always `<root>/imports/<job>`.
@@ -121,6 +166,7 @@ pub async fn run_ingestion(
     app: AppHandle,
     archive_paths: Vec<String>,
 ) -> Result<IngestionSummary, String> {
+    let guard = IngestionGuard::acquire_in(&INGESTING)?;
     if archive_paths.is_empty() {
         return Err("no archive files provided".to_string());
     }
@@ -153,6 +199,7 @@ pub async fn run_ingestion(
 
     let result = tauri::async_runtime::spawn_blocking(
         move || -> Result<IngestionSummary, String> {
+            let _guard = guard; // released when the blocking task ends (even on panic)
             let emit_extract = |processed: usize, total: usize, message: String| {
                 emit_progress(
                     &app_for_blocking,
@@ -215,6 +262,13 @@ pub async fn run_ingestion(
             let profile_summary =
                 profile::build_profile_snapshot_blocking(&conn, &destination_for_blocking, &emit_profile)?;
 
+            // DB phase done: drop extracted files no asset row points at.
+            let (pruned_files, pruned_bytes) =
+                prune_unreferenced(&conn, &media_root_for_blocking, &destination_for_blocking)?;
+            crate::log::log_info!(
+                "[ingestion:{job_id_for_blocking}] pruned {pruned_files} unreferenced files ({pruned_bytes} bytes)"
+            );
+
             // Release the lock before the (potentially long, one ffmpeg call
             // per asset) media-processing phase so other commands aren't
             // frozen out of the DB for the rest of the job - process_pending_media
@@ -269,6 +323,8 @@ pub async fn run_ingestion(
                 playback_transcoded: media_summary.playback_transcoded,
                 playback_failed: media_summary.playback_failed,
                 media_cancelled: media_summary.cancelled,
+                pruned_files,
+                pruned_bytes,
             })
         },
     )
@@ -303,6 +359,60 @@ pub async fn run_ingestion(
     }
 
     result
+}
+
+/// Case-insensitive on Windows, like the filesystem.
+fn path_key(p: &Path) -> String {
+    let s = p.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) { s.to_lowercase() } else { s }
+}
+
+/// Deletes every file under `job_dir` that no `assets` row references
+/// (original/overlay/playback/thumbnail), then empty dirs (the job dir itself
+/// included). Chat media links go through asset rows, and no later step reads
+/// the extracted JSON/HTML (parsed into the DB), so those are pruned too.
+/// Stays inside `job_dir`, never follows symlinks (they are left untouched).
+/// Returns (files, bytes) removed.
+fn prune_unreferenced(
+    conn: &rusqlite::Connection,
+    media_root: &Path,
+    job_dir: &Path,
+) -> Result<(usize, u64), String> {
+    let mut keep = std::collections::HashSet::new();
+    let mut stmt = conn
+        .prepare("SELECT original_path, overlay_path, playback_path, thumbnail_path FROM assets")
+        .map_err(|err| format!("failed to list asset paths: {err}"))?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok([r.get::<_, Option<String>>(0)?, r.get(1)?, r.get(2)?, r.get(3)?])
+        })
+        .map_err(|err| format!("failed to list asset paths: {err}"))?;
+    for row in rows {
+        for stored in row.map_err(|err| err.to_string())?.into_iter().flatten() {
+            keep.insert(path_key(&crate::storage::to_absolute(media_root, &stored)));
+        }
+    }
+    let mut totals = (0usize, 0u64);
+    // Refuse anything that is not a real directory (symlinked job dir, missing).
+    if fs::symlink_metadata(job_dir).is_ok_and(|m| m.is_dir()) {
+        prune_dir(job_dir, &keep, &mut totals);
+    }
+    Ok(totals)
+}
+
+fn prune_dir(dir: &Path, keep: &std::collections::HashSet<String>, totals: &mut (usize, u64)) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&path) else { continue };
+        if meta.is_dir() {
+            prune_dir(&path, keep, totals);
+        } else if meta.is_file() && !keep.contains(&path_key(&path)) && fs::remove_file(&path).is_ok() {
+            totals.0 += 1;
+            totals.1 += meta.len();
+        }
+    }
+    let _ = fs::remove_dir(dir); // only succeeds when empty
 }
 
 /// Finds the `part-NNN` directories every ingestion job's files live under
@@ -562,6 +672,38 @@ mod tests {
     use zip::write::SimpleFileOptions;
 
     #[test]
+    fn ingestion_guard_blocks_second_run_and_maintenance() {
+        let flag = std::sync::atomic::AtomicBool::new(false);
+        assert!(ensure_no_import_in(&flag).is_ok());
+        let g = IngestionGuard::acquire_in(&flag).unwrap();
+        assert_eq!(IngestionGuard::acquire_in(&flag).err().unwrap(), "An import is already running.");
+        assert_eq!(
+            ensure_no_import_in(&flag).unwrap_err(),
+            "An import is running; try again when it finishes."
+        );
+        drop(g);
+        assert!(ensure_no_import_in(&flag).is_ok());
+        assert!(IngestionGuard::acquire_in(&flag).is_ok());
+    }
+
+    #[test]
+    fn ingestion_guard_released_after_error_and_panic() {
+        let flag = std::sync::atomic::AtomicBool::new(false);
+        let r: Result<(), String> = (|| {
+            let _g = IngestionGuard::acquire_in(&flag)?;
+            Err("boom".to_string())
+        })();
+        assert!(r.is_err());
+        assert!(IngestionGuard::acquire_in(&flag).is_ok());
+        let p = std::panic::catch_unwind(|| {
+            let _g = IngestionGuard::acquire_in(&flag).unwrap();
+            panic!("x");
+        });
+        assert!(p.is_err());
+        assert!(IngestionGuard::acquire_in(&flag).is_ok());
+    }
+
+    #[test]
     fn days_from_civil_matches_known_epoch_offsets() {
         assert_eq!(days_from_civil(1970, 1, 1), 0);
         assert_eq!(days_from_civil(2000, 1, 1), 10_957);
@@ -766,6 +908,86 @@ mod tests {
         println!("BENCH memories={} in {t_mem:?}; chats={} in {:?}", m.memory_items_inserted, c.messages_inserted, t.elapsed());
         assert_eq!(m.assets_inserted, 5000);
         assert_eq!(c.messages_inserted, 20000);
+    }
+
+    /// Writes a synthetic job under `<root>/imports/<name>` and ingests it.
+    fn ingest_job(conn: &rusqlite::Connection, root: &Path, name: &str, extra: bool) -> PathBuf {
+        let job = root.join("imports").join(name);
+        let part = job.join("part-000");
+        for d in ["memories", "json", "chat_media"] {
+            fs::create_dir_all(part.join(d)).unwrap();
+        }
+        fs::write(part.join("memories/2020-12-19_aaa-main.jpg"), b"jpg").unwrap();
+        fs::write(part.join("memories/2020-12-19_aaa-overlay.png"), b"png").unwrap();
+        fs::write(part.join("chat_media/2026-07-07_b~Abc.jpg"), b"chat").unwrap();
+        let mut saved = vec![serde_json::json!({"Date": "2020-12-19 10:00:00 UTC", "Media Type": "Image"})];
+        if extra {
+            fs::write(part.join("memories/2021-01-02_bbb-main.jpg"), b"jpg2").unwrap();
+            saved.push(serde_json::json!({"Date": "2021-01-02 10:00:00 UTC", "Media Type": "Image"}));
+        }
+        fs::write(part.join("json/memories_history.json"), serde_json::json!({ "Saved Media": saved }).to_string()).unwrap();
+        let chats = serde_json::json!({ "f": [{
+            "From": "f", "Media Type": "MEDIA", "Created": "2026-07-07 22:44:03 UTC", "Content": "",
+            "Created(microseconds)": 1, "Media IDs": "b~Abc"
+        }]});
+        fs::write(part.join("json/chat_history.json"), chats.to_string()).unwrap();
+        memories::parse_memories_blocking(conn, &job, &|_, _, _| {}).unwrap();
+        chats::parse_chats_blocking(conn, &job, &|_, _, _| {}).unwrap();
+        job
+    }
+
+    fn files_under(dir: &Path) -> usize {
+        fs::read_dir(dir).map_or(0, |rd| {
+            rd.flatten()
+                .map(|e| if e.path().is_dir() { files_under(&e.path()) } else { 1 })
+                .sum()
+        })
+    }
+
+    fn test_db() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate(&conn, crate::db::MIGRATIONS, Path::new("/none")).unwrap();
+        conn
+    }
+
+    #[test]
+    fn prune_keeps_referenced_and_removes_fully_duplicate_job() {
+        let root = tempdir();
+        let conn = test_db();
+        let job1 = ingest_job(&conn, &root, "j1", false);
+        // First import: only the json files are unreferenced (3 media referenced).
+        let (n, bytes) = prune_unreferenced(&conn, &root, &job1).unwrap();
+        assert_eq!(n, 2);
+        assert!(bytes > 0);
+        assert_eq!(files_under(&job1), 3);
+        assert!(job1.join("part-000/memories/2020-12-19_aaa-overlay.png").is_file());
+        assert!(!job1.join("part-000/json").exists()); // empty dir removed
+
+        // Re-import of the same export: everything dedupes, whole job dir goes.
+        let job2 = ingest_job(&conn, &root, "j2", false);
+        let (n, _) = prune_unreferenced(&conn, &root, &job2).unwrap();
+        assert_eq!(n, 5);
+        assert!(!job2.exists());
+        assert_eq!(files_under(&job1), 3);
+        let assets: i64 = conn.query_row("SELECT COUNT(*) FROM assets", [], |r| r.get(0)).unwrap();
+        assert_eq!(assets, 2);
+        // Idempotent / missing dir is a no-op.
+        assert_eq!(prune_unreferenced(&conn, &root, &job2).unwrap(), (0, 0));
+    }
+
+    #[test]
+    fn prune_partial_overlap_keeps_only_new_assets() {
+        let root = tempdir();
+        let conn = test_db();
+        let job1 = ingest_job(&conn, &root, "j1", false);
+        prune_unreferenced(&conn, &root, &job1).unwrap();
+        let job2 = ingest_job(&conn, &root, "j2", true);
+        prune_unreferenced(&conn, &root, &job2).unwrap();
+        // Only the new memory survives in job2; duplicates + json are gone.
+        assert_eq!(files_under(&job2), 1);
+        assert!(job2.join("part-000/memories/2021-01-02_bbb-main.jpg").is_file());
+        assert!(!job2.join("part-000/chat_media").exists());
+        assert_eq!(files_under(&job1), 3);
     }
 
     fn tempdir() -> PathBuf {

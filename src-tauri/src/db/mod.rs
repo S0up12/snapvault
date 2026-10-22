@@ -24,7 +24,7 @@ type Migration = fn(&Connection, &Path) -> rusqlite::Result<()>;
 /// v1 baseline, and fresh databases replay every later migration on top of it.
 /// Plain DDL (ALTER TABLE, CREATE INDEX, table rebuild for CHECK/type changes)
 /// is fine; avoid `PRAGMA`s that cannot run inside a transaction.
-pub(crate) const MIGRATIONS: &[Migration] = &[migrate_v1_baseline, migrate_v2_relative_paths, migrate_v3_playback_failed, migrate_v4_chat_fts];
+pub(crate) const MIGRATIONS: &[Migration] = &[migrate_v1_baseline, migrate_v2_relative_paths, migrate_v3_playback_failed, migrate_v4_chat_fts, migrate_v5_chat_external_ids];
 
 /// v1 baseline = schema.rs + every column that used to be added ad hoc + the
 /// is_sender backfill. Idempotent, so it is also correct for legacy databases
@@ -94,6 +94,26 @@ fn migrate_v4_chat_fts(conn: &Connection, _root: &Path) -> rusqlite::Result<()> 
          INSERT INTO chat_messages_fts(rowid, body)
             SELECT rowid, body FROM chat_messages WHERE body IS NOT NULL AND body <> '';",
     )
+}
+
+/// v5: backfill `assets.external_id` (`chat:<file name>`, exactly what
+/// `ingestion::chats::upsert_chat_asset` derives) for chat assets ingested
+/// before ids were written, so a re-import dedupes instead of duplicating them.
+/// Rows whose path has no usable file name are skipped. Idempotent (only NULLs).
+fn migrate_v5_chat_external_ids(conn: &Connection, _root: &Path) -> rusqlite::Result<()> {
+    let rows: Vec<(String, String)> = conn
+        .prepare("SELECT id, original_path FROM assets WHERE source_type = 'chat' AND external_id IS NULL")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut stmt = conn.prepare("UPDATE assets SET external_id = ?1 WHERE id = ?2 AND external_id IS NULL")?;
+    for (id, path) in rows {
+        // Stored paths are relative with '/' or legacy absolute (maybe '').
+        let name = path.rsplit(['/', '\\']).next().unwrap_or("");
+        if !name.is_empty() && name != "." && name != ".." {
+            stmt.execute(rusqlite::params![format!("chat:{name}"), id])?;
+        }
+    }
+    Ok(())
 }
 
 /// Applies pending migrations, each in its own transaction with its version bump.
@@ -361,7 +381,7 @@ mod tests {
         }
         assert!(conn.prepare("SELECT 1 FROM chat_messages_fts").is_err());
         migrate(&conn, MIGRATIONS, Path::new("/none")).unwrap();
-        assert_eq!(version(&conn), 4);
+        assert_eq!(version(&conn), MIGRATIONS.len() as i64);
         let hits = |q: &str| -> i64 {
             conn.query_row("SELECT COUNT(*) FROM chat_messages_fts WHERE chat_messages_fts MATCH ?1", [q], |r| r.get(0)).unwrap()
         };
@@ -369,5 +389,35 @@ mod tests {
         let docs: i64 = conn.query_row("SELECT COUNT(*) FROM chat_messages_fts_docsize", [], |r| r.get(0)).unwrap();
         assert_eq!(docs, 2);
         conn.execute_batch("INSERT INTO chat_messages_fts(chat_messages_fts) VALUES('integrity-check')").unwrap();
+    }
+
+    #[test]
+    fn v5_backfills_chat_external_ids_only_where_derivable() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn, &MIGRATIONS[..4], Path::new("/none")).unwrap();
+        for (id, src, ext, path) in [
+            ("c1", "chat", None, "imports/j/part-000/chat_media/2020-01-01_b~Abc.jpg"),
+            ("c2", "chat", None, r"C:\x\imports\j\chat_media\2020-01-01_b~Def.MP4"),
+            ("c3", "chat", Some("keep"), "imports/j/z.jpg"),
+            ("c4", "chat", None, "imports/j/dir/"),
+            ("m1", "memory", None, "imports/j/2020-01-01_x-main.jpg"),
+        ] {
+            conn.execute(
+                "INSERT INTO assets (id, source_type, external_id, media_type, original_path) VALUES (?1, ?2, ?3, 'image', ?4)",
+                rusqlite::params![id, src, ext, path],
+            )
+            .unwrap();
+        }
+        migrate(&conn, MIGRATIONS, Path::new("/none")).unwrap();
+        migrate(&conn, MIGRATIONS, Path::new("/none")).unwrap(); // idempotent
+        assert_eq!(version(&conn), MIGRATIONS.len() as i64);
+        let ext = |id: &str| -> Option<String> {
+            conn.query_row("SELECT external_id FROM assets WHERE id = ?1", [id], |r| r.get(0)).unwrap()
+        };
+        assert_eq!(ext("c1").as_deref(), Some("chat:2020-01-01_b~Abc.jpg"));
+        assert_eq!(ext("c2").as_deref(), Some("chat:2020-01-01_b~Def.MP4"));
+        assert_eq!(ext("c3").as_deref(), Some("keep"));
+        assert_eq!(ext("c4"), None);
+        assert_eq!(ext("m1"), None);
     }
 }
