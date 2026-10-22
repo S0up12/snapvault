@@ -1,6 +1,6 @@
 ---
 name: sv-perf
-description: Performance optimizer for SnapVault. Use when something is slow or heavy - import time, memory use, thumbnail/transcode throughput, grid scrolling, DB queries. Measures before and after.
+description: Performance optimizer for Snapvault. Use when something is slow or heavy - import time, memory use, thumbnail/transcode throughput, grid scrolling, DB queries. Measures before and after.
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: sonnet
 ---

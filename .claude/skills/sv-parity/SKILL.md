@@ -1,12 +1,12 @@
 ---
 name: sv-parity
-description: Map from SnapVault Rust ingestion features to the legacy SnapCapsule-Web-V2 Python source of truth. Use when fixing timestamps, overlays, thumbnails, chat links, or any Snapchat export quirk.
+description: Map from Snapvault Rust ingestion features to the legacy SnapCapsule-Web-V2 Python source of truth. Use when fixing timestamps, overlays, thumbnails, chat links, or any Snapchat export quirk.
 ---
 # Legacy parity (read-only reference)
 
 Root: `C:\Users\Sammy\Documents\GitHub\SnapCapsule-Web-V2` (do not modify; never ask for the path).
 
-| Concern | Legacy file | SnapVault target |
+| Concern | Legacy file | Snapvault target |
 |---|---|---|
 | Timestamp repair | `scripts/repair_memory_timestamps_from_archives.py` | `src-tauri/src/ingestion/memories.rs` |
 | Overlay compositing | `scripts/repair_memory_overlays.py` | `src-tauri/src/thumbnails.rs` |

@@ -65,7 +65,7 @@ pub fn run() {
                     eprintln!("logging to file disabled: {err}");
                 }
             }
-            log::log_info!("SnapVault starting");
+            log::log_info!("Snapvault starting");
             let conn = db::init(app.handle())?;
             app.manage(DbState(Mutex::new(conn)));
 

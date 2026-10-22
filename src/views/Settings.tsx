@@ -233,7 +233,7 @@ function StorageLocationPanel() {
     <Panel
       kicker="Storage"
       title="Media location"
-      description="Your database (a few MB, metadata only) always stays in SnapVault's app-data folder. This only controls where your photos, videos, chat attachments, and thumbnails are stored."
+      description="Your database (a few MB, metadata only) always stays in Snapvault's app-data folder. This only controls where your photos, videos, chat attachments, and thumbnails are stored."
     >
       {error ? (
         <p className="text-sm text-red-400">Failed to load storage settings: {error}</p>
@@ -560,7 +560,7 @@ function PerformanceSettingsPanel() {
             </div>
           </SettingsRow>
 
-          <SettingsRow label="Process media when SnapVault starts" hint="Resume any unfinished thumbnails and video conversions each time the app opens." last>
+          <SettingsRow label="Process media when Snapvault starts" hint="Resume any unfinished thumbnails and video conversions each time the app opens." last>
             <Toggle checked={settings.process_on_startup} onChange={() => handlePatch({ process_on_startup: !settings.process_on_startup })} disabled={isSaving} />
           </SettingsRow>
         </div>
@@ -638,7 +638,7 @@ function AboutPanel() {
   }, []);
 
   return (
-    <Panel kicker="About" title="SnapVault" description="A self-hosted, offline-first viewer for exported Snapchat data. Everything stays on your device.">
+    <Panel kicker="About" title="Snapvault" description="A self-hosted, offline-first viewer for exported Snapchat data. Everything stays on your device.">
       <SettingsRow label="Version" hint="Installed build">
         <span className="text-sm text-neutral-300">{version || "-"}</span>
       </SettingsRow>

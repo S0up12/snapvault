@@ -1,6 +1,6 @@
 # Helper scripts
 
-These scripts get SnapVault running on a Windows PC without needing to know
+These scripts get Snapvault running on a Windows PC without needing to know
 any of the underlying tooling. Run them in this order:
 
 1. **`Install-Dependencies.ps1`** - one-time setup. Installs Node.js, Rust,
@@ -9,7 +9,7 @@ any of the underlying tooling. Run them in this order:
 2. **`Check-Environment.ps1`** - confirms everything installed correctly.
    Safe to run anytime; it never changes anything.
 3. **`Start-Dev.ps1`** - launches the app. Use this day-to-day while working
-   on SnapVault.
+   on Snapvault.
 4. **`Clean-Build.ps1`** - wipes all build files and rebuilds from scratch.
    Use this if something feels broken, or after pulling new changes that
    don't seem to take effect. Add `-Release` to build the real installer

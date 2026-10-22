@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Checks whether this PC has everything SnapVault needs to build and run.
+    Checks whether this PC has everything Snapvault needs to build and run.
 
 .DESCRIPTION
     This script does NOT install or change anything - it only looks and
@@ -35,7 +35,7 @@ $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
 $env:Path = "$machinePath;$userPath;$env:Path"
 
 Write-Host ""
-Write-Host "SnapVault environment check" -ForegroundColor Cyan
+Write-Host "Snapvault environment check" -ForegroundColor Cyan
 Write-Host "============================"
 Write-Host ""
 

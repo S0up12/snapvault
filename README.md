@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="src-tauri/icons/128x128.png" alt="SnapVault" width="96" height="96" />
+<img src="src-tauri/icons/128x128.png" alt="Snapvault" width="96" height="96" />
 
-# SnapVault
+# Snapvault
 
 **Browse your exported Snapchat data like a real library, offline, on your own machine.**
 
@@ -13,7 +13,7 @@
 
 </div>
 
-Snapchat's "Download My Data" gives you a pile of zip files, loose media and JSON. SnapVault turns that pile into something you can actually look through: a memories grid, your chats, and your profile.
+Snapchat's "Download My Data" gives you a pile of zip files, loose media and JSON. Snapvault turns that pile into something you can actually look through: a memories grid, your chats, and your profile.
 
 Everything happens locally. There is no account, no server and no upload. Your export and everything generated from it stay in your own app-data folder.
 
@@ -33,16 +33,16 @@ Everything happens locally. There is no account, no server and no upload. Your e
 
 Installers will be published on the [Releases](https://github.com/S0up12/snapvault/releases) page once the first version is tagged. Until then, run it from source (below).
 
-**ffmpeg:** SnapVault uses `ffmpeg` and `ffprobe` for thumbnails, overlays and video conversion. The installer bundles them (see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for licensing). When running from source, they must be on your `PATH`, and the Dashboard shows a warning if they are missing.
+**ffmpeg:** Snapvault uses `ffmpeg` and `ffprobe` for thumbnails, overlays and video conversion. The installer bundles them (see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for licensing). When running from source, they must be on your `PATH`, and the Dashboard shows a warning if they are missing.
 
-SnapVault is developed and tested on Windows 11. The code uses portable paths throughout, but macOS and Linux have not been tested yet.
+Snapvault is developed and tested on Windows 11. The code uses portable paths throughout, but macOS and Linux have not been tested yet.
 
 ## Get your Snapchat data
 
 1. Open [accounts.snapchat.com](https://accounts.snapchat.com) and go to **My Data**.
-2. Select at least **Memories**, **Chat History** and **Profile** data, and make sure the **JSON** files are included. SnapVault needs `memories_history.json` and the other JSON files for correct dates and metadata.
+2. Select at least **Memories**, **Chat History** and **Profile** data, and make sure the **JSON** files are included. Snapvault needs `memories_history.json` and the other JSON files for correct dates and metadata.
 3. Submit the request. Snapchat emails you a link when the export is ready. Large exports are split into several zip files, so download all of them.
-4. In SnapVault, choose **Select Snapchat export (.zip)** on the Dashboard and select every part at once.
+4. In Snapvault, choose **Select Snapchat export (.zip)** on the Dashboard and select every part at once.
 
 ## Run from source
 
@@ -94,7 +94,7 @@ scripts/        Windows setup and dev helper scripts
 
 ## Privacy
 
-SnapVault makes no network requests of its own. Fonts are bundled, there is no analytics or telemetry, and imported data never leaves your device. Logs are written to a local file in the app-data folder with file paths redacted, and never contain message text.
+Snapvault makes no network requests of its own. Fonts are bundled, there is no analytics or telemetry, and imported data never leaves your device. Logs are written to a local file in the app-data folder with file paths redacted, and never contain message text.
 
 ## Known limitations
 
@@ -111,7 +111,7 @@ Issues and pull requests are welcome. Architecture notes and project rules are i
 
 ## Disclaimer
 
-SnapVault is an independent project and is not affiliated with, endorsed by or sponsored by Snap Inc. Snapchat is a trademark of Snap Inc.
+Snapvault is an independent project and is not affiliated with, endorsed by or sponsored by Snap Inc. Snapchat is a trademark of Snap Inc.
 
 ## License
 

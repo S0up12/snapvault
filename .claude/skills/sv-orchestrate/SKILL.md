@@ -1,8 +1,8 @@
 ---
 name: sv-orchestrate
-description: How the lead session routes SnapVault work to the sv-* subagents within Claude Team plan usage limits. Use at the start of any non-trivial SnapVault feature, bug, or optimization task.
+description: How the lead session routes Snapvault work to the sv-* subagents within Claude Team plan usage limits. Use at the start of any non-trivial Snapvault feature, bug, or optimization task.
 ---
-# SnapVault orchestration
+# Snapvault orchestration
 
 You (the main session) are the orchestrator. Subagents cannot spawn subagents. Every subagent call spends shared Team-plan usage, so delegate only when it saves more than it costs.
 

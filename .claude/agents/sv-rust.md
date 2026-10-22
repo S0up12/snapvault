@@ -1,6 +1,6 @@
 ---
 name: sv-rust
-description: SnapVault Rust backend implementer. Use for Tauri commands, rusqlite/schema changes, settings, storage, and non-ingestion backend logic in src-tauri/src.
+description: Snapvault Rust backend implementer. Use for Tauri commands, rusqlite/schema changes, settings, storage, and non-ingestion backend logic in src-tauri/src.
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: sonnet
 ---

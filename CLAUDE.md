@@ -1,7 +1,7 @@
-# SnapVault - Project Guidelines
+# Snapvault - Project Guidelines
 
 ## 🎯 Project Overview
-SnapVault is a self-hosted, offline-first desktop application that allows users to view and interact with their exported Snapchat data (memories, chats, profile data). 
+Snapvault is a self-hosted, offline-first desktop application that allows users to view and interact with their exported Snapchat data (memories, chats, profile data). 
 
 This project is a complete rewrite of an existing Dockerized web application (formerly SnapCapsule). The goal of this rewrite is to make the application lightweight, easy to install, and heavily optimized for the average desktop user by eliminating all server-side infrastructure (Docker, PostgreSQL, Redis, Celery).
 
@@ -15,7 +15,7 @@ Whenever instructed to port a feature, reference this directory. Do not ask for 
 * **Edge Cases & Fixes:** Look in `scripts/` and `packages/snapcapsule_core/services/` for scripts related to repairing timestamps, backfilling thumbnails, and fixing overlays.
 
 ## ⚠️ CRITICAL: Ingestion, File Handling, and Metadata
-The most complex and vital part of SnapVault is accurately extracting and processing the Snapchat `.zip` export. Snapchat exports are messy, and the old repository contains specific logic to fix these quirks. When translating the ingestion pipeline to Rust, you MUST strictly adhere to the following:
+The most complex and vital part of Snapvault is accurately extracting and processing the Snapchat `.zip` export. Snapchat exports are messy, and the old repository contains specific logic to fix these quirks. When translating the ingestion pipeline to Rust, you MUST strictly adhere to the following:
 1.  **JSON over EXIF:** Snapchat media files often lack correct EXIF data. You must rely on the provided `memories_history.json` and other JSON files to derive the absolute truth for timestamps, location data, and tags.
 2.  **Timestamp Repair:** The Rust backend must explicitly apply the correct timestamps to the extracted files and the database, recreating the logic previously handled by Python scripts (like `repair_memory_timestamps_from_archives.py`).
 3.  **Overlays:** Snapchat saves captions/drawings as separate transparent images. The Rust media processor must composite these overlays onto the base image/video accurately to recreate the original snap.

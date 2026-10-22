@@ -44,7 +44,7 @@ export default function NavBar({ memoriesFilters, chatsFilters }: NavBarProps) {
     <div className="flex h-[58px] shrink-0 items-center gap-2.5 border-b border-divider px-5">
       <span className="flex items-center gap-2.5">
         <Aperture className="h-[22px] w-[22px] text-accent" />
-        <span className="text-base font-medium">SnapVault</span>
+        <span className="text-base font-medium">Snapvault</span>
       </span>
 
       <nav className="mx-auto flex gap-1">

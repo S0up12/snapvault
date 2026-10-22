@@ -1,5 +1,5 @@
 # ============================================================
-# SnapVault .gitignore
+# Snapvault .gitignore
 # Enforces the Security & Version Control rules in CLAUDE.md:
 # no server data, no secrets, no user data, no build artifacts.
 # ============================================================

@@ -1,6 +1,6 @@
 ---
 name: sv-add-command
-description: Checklist for adding or changing a Tauri IPC command end to end in SnapVault (Rust fn, registration, TS hook).
+description: Checklist for adding or changing a Tauri IPC command end to end in Snapvault (Rust fn, registration, TS hook).
 ---
 # Add a Tauri command
 

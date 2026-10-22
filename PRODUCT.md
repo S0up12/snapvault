@@ -8,7 +8,7 @@ desktop
 
 ## Users
 
-People who've exported their own data via Snapchat's "Download My Data" tool and want to actually browse it — the raw export is a pile of loose media files and JSON, not something you can look through. SnapVault is distributed for other Snapchat users to self-host on their own machine, not just for personal use: each person installs it, imports their own export, and everything stays local to their device.
+People who've exported their own data via Snapchat's "Download My Data" tool and want to actually browse it — the raw export is a pile of loose media files and JSON, not something you can look through. Snapvault is distributed for other Snapchat users to self-host on their own machine, not just for personal use: each person installs it, imports their own export, and everything stays local to their device.
 
 ## Product Purpose
 
@@ -16,11 +16,11 @@ View and interact with an exported Snapchat archive — memories (photos/videos)
 
 ## Positioning
 
-A full rewrite of an earlier Dockerized web app (SnapCapsule) that required standing up Docker, PostgreSQL, Redis, and Celery just to view your own export. SnapVault is a single lightweight desktop installer (Tauri) with no server infrastructure at all — everything (extraction, database, media processing) runs locally in the user's own OS AppData directory. That's the meaningful difference a competing viewer built as a hosted/server-based tool couldn't claim: nothing about using it ever leaves the user's machine, and there's nothing to deploy.
+A full rewrite of an earlier Dockerized web app (SnapCapsule) that required standing up Docker, PostgreSQL, Redis, and Celery just to view your own export. Snapvault is a single lightweight desktop installer (Tauri) with no server infrastructure at all — everything (extraction, database, media processing) runs locally in the user's own OS AppData directory. That's the meaningful difference a competing viewer built as a hosted/server-based tool couldn't claim: nothing about using it ever leaves the user's machine, and there's nothing to deploy.
 
 ## Operating Context
 
-Typical flow: user downloads their Snapchat data export (.zip) from Snapchat, imports it into SnapVault, which streams extraction/parsing progress via Tauri IPC while it derives absolute-truth timestamps and tags from `memories_history.json` and related export JSON (export EXIF data is not trusted), composites overlay images onto their base media, and generates thumbnails/transcodes video via bundled ffmpeg. The user then browses via Dashboard, Memories (grid with filters, tags, favorites, year scrubber), Chats, Stories, and Profile views, and manages storage/performance/viewer preferences in Settings.
+Typical flow: user downloads their Snapchat data export (.zip) from Snapchat, imports it into Snapvault, which streams extraction/parsing progress via Tauri IPC while it derives absolute-truth timestamps and tags from `memories_history.json` and related export JSON (export EXIF data is not trusted), composites overlay images onto their base media, and generates thumbnails/transcodes video via bundled ffmpeg. The user then browses via Dashboard, Memories (grid with filters, tags, favorites, year scrubber), Chats, Stories, and Profile views, and manages storage/performance/viewer preferences in Settings.
 
 ## Capabilities and Constraints
 
@@ -34,7 +34,7 @@ Typical flow: user downloads their Snapchat data export (.zip) from Snapchat, im
 
 ## Brand Commitments
 
-Product name is **SnapVault** (rebranded from the earlier SnapCapsule project this rewrites). Current UI direction is a dark "Nocturne" theme with a top nav bar (see `redesign/SnapVault Redesign.dc.html` for the design reference used for the latest pass) — full visual system belongs in DESIGN.md, not here.
+Product name is **Snapvault** (rebranded from the earlier SnapCapsule project this rewrites). Current UI direction is a dark "Nocturne" theme with a top nav bar (see `redesign/Snapvault Redesign.dc.html` for the design reference used for the latest pass) — full visual system belongs in DESIGN.md, not here.
 
 ## Evidence on Hand
 

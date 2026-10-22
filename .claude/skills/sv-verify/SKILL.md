@@ -1,6 +1,6 @@
 ---
 name: sv-verify
-description: Commands to verify SnapVault changes compile and type-check. Use after any Rust or TypeScript edit, before reporting done.
+description: Commands to verify Snapvault changes compile and type-check. Use after any Rust or TypeScript edit, before reporting done.
 ---
 # Verify
 

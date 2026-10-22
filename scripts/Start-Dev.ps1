@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Launches SnapVault in development mode.
+    Launches Snapvault in development mode.
 
 .DESCRIPTION
     Starts the app with live-reload: editing frontend or Rust code will
@@ -38,7 +38,7 @@ if (-not (Test-Path (Join-Path $repoRoot "node_modules"))) {
 Push-Location $repoRoot
 try {
     Write-Host ""
-    Write-Host "Starting SnapVault... a window should open in a few seconds." -ForegroundColor Cyan
+    Write-Host "Starting Snapvault... a window should open in a few seconds." -ForegroundColor Cyan
     Write-Host "(Press Ctrl+C here to stop it.)" -ForegroundColor DarkGray
     Write-Host ""
     npm run tauri dev

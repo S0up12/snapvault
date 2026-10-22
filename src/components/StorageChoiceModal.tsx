@@ -34,7 +34,7 @@ export default function StorageChoiceModal({ defaultPath, allowCancel, onCancel,
 
   async function chooseFolder() {
     const selected = await open({
-      title: "Choose a folder for SnapVault to store your memories, chats, and thumbnails",
+      title: "Choose a folder for Snapvault to store your memories, chats, and thumbnails",
       directory: true,
       multiple: false,
     });
@@ -70,7 +70,7 @@ export default function StorageChoiceModal({ defaultPath, allowCancel, onCancel,
         <div className="flex items-start justify-between">
           <div>
             <p className="text-[10px] uppercase tracking-[0.14em] text-accent">Storage Location</p>
-            <h2 className="dialog-title mt-1">Where should SnapVault store your data?</h2>
+            <h2 className="dialog-title mt-1">Where should Snapvault store your data?</h2>
             <p className="dialog-body mt-2">
               Your photos, videos, chat attachments, and generated thumbnails will be saved here. You
               can change this later in Settings, as long as your library is empty.

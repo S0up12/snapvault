@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Wipes all build artifacts and rebuilds SnapVault from scratch.
+    Wipes all build artifacts and rebuilds Snapvault from scratch.
 
 .DESCRIPTION
     Use this when something feels broken and you want a truly clean build -

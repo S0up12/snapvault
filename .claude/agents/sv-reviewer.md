@@ -1,6 +1,6 @@
 ---
 name: sv-reviewer
-description: Independent reviewer/verifier for SnapVault changes. Use after implementation to check the diff for bugs, rule violations, and compile/type errors. Read-only on source.
+description: Independent reviewer/verifier for Snapvault changes. Use after implementation to check the diff for bugs, rule violations, and compile/type errors. Read-only on source.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---

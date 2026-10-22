@@ -1,6 +1,6 @@
 ---
 name: sv-ui
-description: SnapVault frontend implementer. Use for React/TypeScript/Tailwind work in src/ - views, components, hooks, Tauri invoke bindings, Nocturne dark theme.
+description: Snapvault frontend implementer. Use for React/TypeScript/Tailwind work in src/ - views, components, hooks, Tauri invoke bindings, Nocturne dark theme.
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: sonnet
 ---

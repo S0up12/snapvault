@@ -169,7 +169,7 @@ fn normalize(p: &Path) -> PathBuf {
 fn validate_destination(dest: &Path, media_root: &Path, system: &[PathBuf], exact: &[PathBuf]) -> Result<(), String> {
     crate::storage::validate_media_root(dest, system, exact).map_err(|e| e.replace("Storage location", "Export folder"))?;
     if crate::storage::path_starts_with(&normalize(dest), &normalize(media_root)) {
-        return Err("Export folder cannot be inside the SnapVault library folder.".to_string());
+        return Err("Export folder cannot be inside the Snapvault library folder.".to_string());
     }
     fs::create_dir_all(dest).map_err(|e| format!("failed to create export folder: {e}"))?;
     let probe = dest.join(format!(".snapvault-write-test-{}", std::process::id()));

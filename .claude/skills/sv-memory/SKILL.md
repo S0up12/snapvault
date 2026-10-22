@@ -1,6 +1,6 @@
 ---
 name: sv-memory
-description: How SnapVault agents read and write the shared project memory in .claude/memory. Use at task start (read index) and task end (record durable learnings).
+description: How Snapvault agents read and write the shared project memory in .claude/memory. Use at task start (read index) and task end (record durable learnings).
 ---
 # Shared memory
 

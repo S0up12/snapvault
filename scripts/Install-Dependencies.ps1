@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Installs everything SnapVault needs to build and run on a fresh PC.
+    Installs everything Snapvault needs to build and run on a fresh PC.
 
 .DESCRIPTION
     Installs, if not already present:
@@ -53,7 +53,7 @@ function Update-SessionPath {
 }
 
 Write-Host ""
-Write-Host "SnapVault dependency installer" -ForegroundColor Cyan
+Write-Host "Snapvault dependency installer" -ForegroundColor Cyan
 Write-Host "================================"
 
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {

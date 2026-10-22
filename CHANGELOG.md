@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to SnapVault. Format: [Keep a Changelog](https://keepachangelog.com/).
+All notable changes to Snapvault. Format: [Keep a Changelog](https://keepachangelog.com/).
 
 ## [0.1.0-beta.2] - 2026-10-22
 
